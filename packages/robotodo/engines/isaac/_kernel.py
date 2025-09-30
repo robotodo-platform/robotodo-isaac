@@ -99,6 +99,12 @@ class Kernel:
         with _undo_isaacsim_monkeypatching():
             import isaacsim
             isaacsim.bootstrap_kernel()
+
+            # # TODO
+            # import carb
+            # carb_logger = carb.logging.acquire_logging()
+            # carb_logger.set_level_threshold(carb.logging.LEVEL_WARN)
+
             from isaacsim.simulation_app import AppFramework
 
             # TODO
@@ -164,7 +170,7 @@ class Kernel:
             # TODO load extensions
 
         # TODO !!!!!
-        self._should_run_app_loop = False
+        self._should_run_app_loop = None
 
     @functools.cached_property
     def carb(self):
@@ -213,8 +219,10 @@ class Kernel:
         return self.carb.settings.get_settings()
 
     def enable_extension(self, name: str, enabled: bool = True):
-        self._app_framework.app.get_extension_manager() \
-            .set_extension_enabled_immediate(name, enabled)
+        ext_manager = self._app_framework.app.get_extension_manager()
+        if ext_manager.is_extension_enabled(name) is enabled:
+            return
+        ext_manager.set_extension_enabled_immediate(name, enabled)
 
 
 import functools

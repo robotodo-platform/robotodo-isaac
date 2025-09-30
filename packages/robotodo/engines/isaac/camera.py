@@ -147,7 +147,7 @@ class Camera:
     # TODO
     @property
     def _todo_stage(self):
-        return self._scene._usd_current_stage
+        return self._scene._usd_stage
 
     # TODO mv to _Kernel and handle caching
     # TODO caching

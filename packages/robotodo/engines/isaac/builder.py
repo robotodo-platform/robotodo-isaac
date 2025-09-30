@@ -1,5 +1,6 @@
 
-
+import contextlib
+import warnings
 from typing import Optional, TypedDict, Unpack
 
 from robotodo.engines.core import PathExpressionLike
@@ -13,16 +14,61 @@ from .entity import Entity
 class USDLoader:
     class Config(TypedDict):
         path: Optional[PathExpressionLike]
-        exist_ok: Optional[bool]
 
-    # TODO use scene._usd_current_stage
+    # TODO rm
+    # # TODO use scene._usd_current_stage
+    # async def __call__(
+    #     self,
+    #     resource_or_model: ...,
+    #     scene: Scene,
+    #     config: Config = Config(),
+    # ):
+        
+    #     match resource_or_model:
+    #         case str() as resource:
+    #             pass
+    #         # TODO support for Usd prims directly??
+    #         case _:
+    #             raise NotImplementedError(f"TODO {resource_or_model}")
+        
+    #     prim_path = config.get("path", None)
+    #     if prim_path is None:
+    #         prim_path = scene._kernel.omni.usd.get_stage_next_free_path(
+    #             scene._usd_current_stage, 
+    #             path="/",
+    #             prepend_default_prim=False,
+    #         )
+
+    #     if prim_path is not None:
+    #         if scene._usd_current_stage.GetPrimAtPath(prim_path).IsValid():
+    #             raise RuntimeError(f"Path already exists: {prim_path}")
+
+    #     # TODO add to scene._usd_current_stage!!!!
+    #     prim = scene._kernel.isaacsim.core.utils.stage \
+    #         .add_reference_to_stage(
+    #             usd_path=resource,
+    #             prim_path=prim_path,
+    #         )
+        
+    #     # TODO FIXME upstream entity: no path roundtrip; ref underlying prim directly
+    #     return Entity(
+    #         path=prim.GetPath().pathString,
+    #         scene=scene,
+    #     )
+    
     async def __call__(
         self,
         resource_or_model: ...,
         scene: Scene,
         config: Config = Config(),
     ):
-        
+        pxr = scene._kernel.pxr
+        omni = scene._kernel.omni        
+
+        # TODO
+        scene._kernel.enable_extension("omni.usd")
+        scene._kernel.enable_extension("omni.usd.metrics.assembler")
+
         match resource_or_model:
             case str() as resource:
                 pass
@@ -32,27 +78,56 @@ class USDLoader:
         
         prim_path = config.get("path", None)
         if prim_path is None:
-            prim_path = scene._kernel.omni.usd.get_stage_next_free_path(
-                scene._usd_current_stage, 
+            prim_path = omni.usd.get_stage_next_free_path(
+                scene._usd_stage, 
                 path="/",
                 prepend_default_prim=False,
             )
 
         if prim_path is not None:
-            if scene._usd_current_stage.GetPrimAtPath(prim_path).IsValid():
-                if not config.get("exist_ok", False):
-                    raise RuntimeError(f"Path already exists: {prim_path}")
-        prim = scene._kernel.isaacsim.core.utils.stage \
-            .add_reference_to_stage(
-                usd_path=resource,
-                prim_path=prim_path,
-            )
+            if scene._usd_stage.GetPrimAtPath(prim_path).IsValid():
+                raise RuntimeError(f"Path already exists: {prim_path}")
+
+        stage = scene._usd_stage
+            
+        sdf_layer = pxr.Sdf.Layer.FindOrOpen(resource_or_model)
+        if not sdf_layer:
+            raise RuntimeError(f"Could not get Sdf layer for {resource_or_model}")
         
+        prim = stage.GetPrimAtPath(prim_path)
+        if not prim.IsValid():
+            # TODO make prim_type customizable??
+            prim = stage.DefinePrim(prim_path, "Xform")
+
+        stage_id = pxr.UsdUtils.StageCache.Get().GetId(stage).ToLongInt()
+        ret_val = omni.metrics.assembler.core.get_metrics_assembler_interface().check_layers(
+            stage.GetRootLayer().identifier, sdf_layer.identifier, stage_id,
+        )
+        if ret_val["ret_val"] != 0:
+            try:
+                scene._kernel.enable_extension("omni.kit.commands")
+
+                payref = pxr.Sdf.Reference(resource_or_model)
+                omni.kit.commands.execute("AddReference", stage=stage, prim_path=prim.GetPath(), reference=payref)
+            except Exception as error:
+                warnings.warn(
+                    f"USD reference {resource_or_model} may have divergent units, "
+                    f"please either enable extension`omni.usd.metrics.assembler` "
+                    f"or convert into right units: {error}"
+                )
+                is_success = prim.GetReferences().AddReference(resource_or_model)
+                if not is_success:
+                    raise RuntimeError(f"Invalid USD reference: {resource_or_model}")
+        else:
+            is_success = prim.GetReferences().AddReference(resource_or_model)
+            if not is_success:
+                raise RuntimeError(f"Invalid USD reference: {resource_or_model}")
+
         # TODO FIXME upstream entity: no path roundtrip; ref underlying prim directly
         return Entity(
             path=prim.GetPath().pathString,
             scene=scene,
-        )
+        )    
 
 
 # TODO usd has two modes: reference and sublayer; 
@@ -76,7 +151,6 @@ class URDFLoader:
         path: Optional[PathExpressionLike]
         fix_root_link: Optional[bool]
         num_copies: Optional[int]
-        exist_ok: Optional[bool]
 
     # TODO use scene._usd_current_stage
     async def __call__(
@@ -97,16 +171,13 @@ class URDFLoader:
         omni = scene._kernel.omni
         isaacsim = scene._kernel.isaacsim
 
-        scene._kernel.enable_extension("isaacsim.asset.importer.urdf")
-
         # TODO
-        scene._kernel.app.get_extension_manager() \
-            .set_extension_enabled_immediate("isaacsim.asset.importer.urdf", True)
-        is_success, import_config = omni.kit.commands.execute(
-            "URDFCreateImportConfig",
-        )
-        assert is_success
+        scene._kernel.enable_extension("omni.kit.commands")
+        scene._kernel.enable_extension("omni.usd")
+        scene._kernel.enable_extension("isaacsim.asset.importer.urdf")
+        scene._kernel.enable_extension("isaacsim.core.utils")
 
+        import_config = isaacsim.asset.importer.urdf._urdf.ImportConfig()
         import_config.make_default_prim = False  # Make the robot the default prim in the scene
         import_config.fix_base = config.get("fix_root_link", False) # Fix the base of the robot to the ground
         import_config.merge_fixed_joints = False
@@ -123,6 +194,7 @@ class URDFLoader:
             case _:
                 raise NotImplementedError(f"TODO {resource_or_model}")
 
+        # TODO use interface
         is_success, robot_model = omni.kit.commands.execute(
             "URDFParseFile",
             # TODO
@@ -134,37 +206,53 @@ class URDFLoader:
         prim_path = config.get("path", None)
         if prim_path is None:
             prim_path = omni.usd.get_stage_next_free_path(
-                scene._usd_current_stage, 
+                scene._usd_stage, 
                 path="/",
                 prepend_default_prim=False,
             )
 
         if prim_path is not None:
-            if scene._usd_current_stage.GetPrimAtPath(prim_path).IsValid():
-                if not config.get("exist_ok", False):
-                    raise RuntimeError(f"Path already exists: {prim_path}")
+            if scene._usd_stage.GetPrimAtPath(prim_path).IsValid():
+                raise RuntimeError(f"Path already exists: {prim_path}")
             
-        stage_context = omni.usd.get_context_from_stage(scene._usd_current_stage)
+        stage_context = omni.usd.get_context_from_stage(scene._usd_stage)
         if stage_context is None:
             raise RuntimeError(
                 f"The USD stage is invalid. "
-                f"Stage: {scene._usd_current_stage}"
+                f"Stage: {scene._usd_stage}"
             )
         if not stage_context.is_writable():
             raise RuntimeError(
                 f"The USD stage does not appear to be writable. Crash may result! "
-                f"Stage: {scene._usd_current_stage}"
+                f"Stage: {scene._usd_stage}"
             )
         
-        # TODO
+        @contextlib.contextmanager
+        def _undo_unnecessary_stage_changes():
+            stage = stage_context.get_stage()
+            
+            default_prim_orig = stage.GetDefaultPrim()
+
+            yield
+
+            stage.SetDefaultPrim(default_prim_orig)
+        
         urdf_interface = isaacsim.asset.importer.urdf._urdf.acquire_urdf_interface()
-        prim_path_temp = urdf_interface.import_robot(
-            assetRoot="",
-            assetName="",
-            robot=robot_model,
-            importConfig=import_config,
-            stage=stage_context.get_stage().GetEditTarget().GetLayer().identifier,
-        )
+        # FIXME BUG:default-prim: 
+        # for some reason when the stage identifier is passed, 
+        # `import_config.make_default_prim` is always `True`!
+        # seealso: https://github.com/isaac-sim/IsaacSim/blob/21bbdbad07ba31687f2ff71f414e9d21a08e16b8/source/extensions/isaacsim.asset.importer.urdf/plugins/isaacsim.asset.importer.urdf/PluginInterface.cpp#L297
+        # FIXME BUG:write-stage: 
+        # this also attempts to output the converted assets to `/configuration` which isn't valid 
+        # when the identifier is a non-fs path!!
+        with _undo_unnecessary_stage_changes():
+            prim_path_temp = urdf_interface.import_robot(
+                assetRoot="",
+                assetName="",
+                robot=robot_model,
+                importConfig=import_config,
+                stage=stage_context.get_stage().GetEditTarget().GetLayer().identifier,
+            )
 
         # TODO rm?
         # is_success, prim_path_temp = omni.kit.commands.execute(
@@ -176,7 +264,6 @@ class URDFLoader:
         #     dest_path=scene._usd_current_stage.GetEditTarget().GetLayer().identifier,
         # )
         # assert is_success
-
 
         if prim_path is None:
             prim_path = prim_path_temp
@@ -211,7 +298,7 @@ async def load_urdf(
     scene: Scene,
     config: URDFLoader.Config = URDFLoader.Config(),
     **config_kwds: Unpack[URDFLoader.Config]
-):
+) -> Articulation:
     return await URDFLoader()(
         scene=scene, 
         resource_or_model=resource_or_model, 
@@ -231,8 +318,13 @@ class USDSceneLoader:
 
         # TODO
         omni = _kernel.omni
+        _kernel.enable_extension("omni.usd")
 
         ctx = omni.usd.get_context()
+        while True:
+            if ctx.can_open_stage():
+                break
+            await ctx.next_stage_event_async()
 
         # TODO NOTE current impl opens model as sublayer: prob safest??
         is_success, message = await ctx.new_stage_async()
@@ -244,7 +336,7 @@ class USDSceneLoader:
             raise RuntimeError("TODO")
         stage.GetRootLayer().subLayerPaths.append(resource_or_model)
 
-        return Scene(_kernel=_kernel, _usd_stage=stage)
+        return Scene(_kernel=_kernel, _usd_stage_ref=stage)
 
 
         # TODO

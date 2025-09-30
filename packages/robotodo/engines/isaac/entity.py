@@ -31,7 +31,7 @@ class Entity:
         cache._notice_token = self._scene._kernel.pxr.Tf.Notice.Register(
             self._scene._kernel.pxr.Usd.Notice.ObjectsChanged, 
             cache._notice_handler, 
-            self._scene._usd_current_stage,
+            self._scene._usd_stage,
         )
 
         return cache
@@ -52,7 +52,7 @@ class Entity:
     # @functools.cached_property
     def _isaac_prims(self):
         return [
-            self._scene._usd_current_stage.GetPrimAtPath(p)
+            self._scene._usd_stage.GetPrimAtPath(p)
             for p in self._scene.resolve(self._path)
         ]
         

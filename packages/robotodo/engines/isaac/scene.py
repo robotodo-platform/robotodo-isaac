@@ -12,7 +12,7 @@ from ._kernel import Kernel, get_default_kernel
 
 
 # TODO !!!! per stage???
-class _PhysicsUpdateAsyncEventStream(BaseAsyncEventStream[None]):
+class _PhysicsStepAsyncEventStream(BaseAsyncEventStream[None]):
     def __init__(self, scene: "Scene"):
         self._scene = scene
 
@@ -57,18 +57,19 @@ class _PhysicsUpdateAsyncEventStream(BaseAsyncEventStream[None]):
 class Scene:
 
     # TODO !!!!!
-    def __init__(self, _kernel: Kernel | None = None, _usd_stage: ... = None):
+    def __init__(self, _kernel: Kernel | None = None, _usd_stage_ref: ... = None):
         if _kernel is None:
             raise NotImplementedError("TODO")
         # TODO !!!!!
         self._kernel = _kernel
-        self._usd_stage = _usd_stage
+        # TODO mv _usd_stage_ref
+        self._usd_stage_ref = _usd_stage_ref
 
-    # TODO !!!!!
+    # TODO mv _usd_stage
     @property
-    def _usd_current_stage(self):
-        if self._usd_stage is not None:
-            return self._usd_stage
+    def _usd_stage(self):
+        if self._usd_stage_ref is not None:
+            return self._usd_stage_ref
 
         # TODO !!!
         stage = self._kernel.omni.usd.get_context().get_stage()
@@ -79,6 +80,55 @@ class Scene:
         # TODO check None
         assert stage is not None
         return stage
+    
+    # TODO prefix with __isaac
+    @functools.cached_property
+    def _isaac_physics_tensor_view_cache(self):
+        try:
+            # TODO FIXME stage_id !!!!!!
+            res = self._kernel.omni.physics.tensors.create_simulation_view("torch")
+        except Exception as error:
+            # TODO
+            raise RuntimeError(
+                "Failed to create physics view. "
+                f"Does a prim of type `PhysicsScene` exist on {self._usd_stage}?"
+                # TODO rm
+                # f"Make sure the physics simulation is running: call {self.timeline_play}"
+            ) from error
+        if not res.is_valid:
+            raise RuntimeError(f"Created physics view is invalid: {res}")
+        return res
+
+    @property
+    def _isaac_physics_tensor_view(self):
+        if not self._isaac_physics_tensor_view_cache.is_valid:
+            del self._isaac_physics_tensor_view_cache
+        return self._isaac_physics_tensor_view_cache
+    
+    # TODO FIXME perf
+    # TODO cache and ensure current stage !!!!
+    @property
+    def _isaac_physx_simulation(self):
+        physx_sim = self._kernel.omni.physx.get_physx_simulation_interface()
+        # TODO FIXME: this causes timeline to stop working
+        # current_stage_id = self._kernel.pxr.UsdUtils.StageCache.Get().GetId(self._usd_current_stage).ToLongInt()
+        # if physx_sim.get_attached_stage() != current_stage_id:
+        #     if not physx_sim.attach_stage(current_stage_id):
+        #         raise RuntimeError(
+        #             f"Failed to attach USD stage {self._usd_current_stage} "
+        #             f"to the PhysX simulation interface {physx_sim}. Is it valid?"
+        #         )
+        return physx_sim
+    
+        # TODO check stage attachment
+        # stage_id = physx_sim.get_attached_stage()
+        # if stage_id == 0:
+        #     pass # get stage from omni
+        # stage_cache = scene._kernel.pxr.UsdUtils.StageCache.Get()
+        # stage_cache.Find(stage_cache.Id.FromLongInt(9223003))
+
+    def has(self, path: PathExpressionLike):    
+        return len(self.resolve(path)) > 0
 
     def traverse(self, path: PathExpressionLike | None = None):
         # TODO
@@ -86,10 +136,10 @@ class Scene:
             raise NotImplementedError(f"TODO {path}")
 
         root_prim = (
-            self._usd_current_stage.GetPseudoRoot()
-            if path is None else
-            # TODO
-            self._usd_current_stage.GetPrimAtPath(self.resolve(path))
+            self._usd_stage.GetPseudoRoot()
+            # if path is None else
+            # # TODO FIXME
+            # self._usd_current_stage.GetPrimAtPath(self.resolve(path))
         )
 
         return (
@@ -109,7 +159,7 @@ class Scene:
         import isaacsim.core.cloner
 
         # TODO check if dir
-        cloner = isaacsim.core.cloner.Cloner(stage=self._usd_current_stage)
+        cloner = isaacsim.core.cloner.Cloner(stage=self._usd_stage)
         source_prim_path = self.resolve(path)
         if len(source_prim_path) != 1:
             raise NotImplementedError("TODO")
@@ -129,42 +179,33 @@ class Scene:
         raise NotImplementedError
 
     # TODO
-    def update(self):
+    # TODO ref https://docs.omniverse.nvidia.com/kit/docs/omni_physics/108.0/dev_guide/simulation_control/simulation_control.html
+
+    # TODO FIXME: this messes up the timeline for some reason !!!!!!!!
+    # TODO api: support time??
+    async def step(self, timestep: float = 1 / 60):
+        if float(timestep) == 0:
+            return
+        physx_sim = self._isaac_physx_simulation
+        physx_sim.simulate(elapsed_time=float(timestep), current_time=0.)
+        # NOTE this ensures the enqueued `.simulate` gets processed
+        # and yes, this is non-async!
+        physx_sim.fetch_results()
+    
+    # TODO 
+    async def reset(self):
         raise NotImplementedError
     
     # TODO
     @functools.cached_property
-    def on_update(self):
-        return _PhysicsUpdateAsyncEventStream(scene=self)
+    def on_step(self):
+        return _PhysicsStepAsyncEventStream(scene=self)
     
     # TODO this should be render??
     @property
     def on_render(self):
         raise NotImplementedError
-
-    # TODO prefix with __isaac
-    @functools.cached_property
-    def __physics_tensor_view_cache(self):
-        try:
-            # TODO stage_id !!!!!!
-            res = self._kernel.omni.physics.tensors.create_simulation_view("torch")
-        except Exception as error:
-            # TODO
-            raise RuntimeError(
-                "Failed to create physics view. "
-                f"Does a prim of type `PhysicsScene` exist on {self._usd_current_stage}?"
-                # TODO rm
-                # f"Make sure the physics simulation is running: call {self.timeline_play}"
-            ) from error
-        if not res.is_valid:
-            raise RuntimeError(f"Created physics view is invalid: {res}")
-        return res
-
-    def _physics_tensor_get_view(self):
-        if not self.__physics_tensor_view_cache.is_valid:
-            del self.__physics_tensor_view_cache
-        return self.__physics_tensor_view_cache
-
+    
     # TODO convenience
     @functools.cached_property
     def viewer(self):

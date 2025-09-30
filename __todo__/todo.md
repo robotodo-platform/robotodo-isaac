@@ -532,3 +532,42 @@ from isaacsim.core.utils.stage import open_stage
 
 open_stage("https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Environments/Grid/default_environment.usd")
 ```
+
+
+- timeline
+```
+omni.timeline.get_timeline_interface
+
+# rewind doesnt seem to work
+timeline = omni.timeline.get_timeline_interface()
+timeline.play()
+timeline.is_auto_updating()
+timeline.get_ticks_per_second(), timeline.get_ticks_per_frame()
+timeline
+import omni
+
+# Obtain the main timeline object
+timeline = omni.timeline.get_timeline_interface()
+
+timeline.get_current_tick(), timeline.get_current_time()
+
+%timeit -n 1_000 timeline.forward_one_frame()
+timeline.get_current_time()
+timeline.play()
+%%timeit -n 10
+
+timeline.forward_one_frame()
+timeline.commit()
+%timeit -n 100
+
+timeline.rewind_one_frame()
+timeline.commit()
+```
+
+- batch api:
+```
+with batch_changes:
+    some_entity.pose = ...
+    ...
+
+```
