@@ -23,7 +23,15 @@ dependencies = [
     "jaxtyping",
 
     # TODO mv pi0
-    "flax",
+    "jax",
+    "jaxtyping",
+    "optax",
+    "einops",
+    "flax!=0.11,<0.13.0",
+    "fsspec[gcs]>=2024.6.0",
+    "orbax-checkpoint>=0.11.13",
+    "sentencepiece",
+    "platformdirs",
 ]
 
 [project.optional-dependencies]

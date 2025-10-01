@@ -391,6 +391,11 @@ class TensorSpec(BaseSpec):
                     f"Dimension '{dim}' specified multiple times: {self.dims}"
                 )
         self.optional_dims = frozenset(optional_dims or self.optional_dims or tuple())
+
+        # TODO
+        if isinstance(shape, Sequence):
+            raise NotImplementedError("TODO")
+
         size_mapping = shape or self.shape or dict()
         self.shape = Shape({dim: size_mapping.get(dim, None) for dim in self.dims})
         self.dtype = dtype or self.dtype or None
@@ -817,7 +822,7 @@ class BoxSpec(TensorSpec):
         # TODO
         self.shape = Shape.from_sizes(
             numpy.broadcast_shapes(
-                *(s for s in self.shape.sizes if s is not None),
+                tuple(s if s is not None else 1 for s in self.shape.sizes),
                 *(b.shape for b in self.bounds if b is not None),
             ),
             dims=self.shape.dims,
@@ -833,6 +838,9 @@ class BoxSpec(TensorSpec):
                     f"Lower bound must be less than or equal to upper bound. "
                     f"Invalid bounds: {self.bounds}"
                 )
+
+    def __repr__(self):
+        return f"{BoxSpec.__qualname__}(bounds={self.bounds}, shape={self.shape})"
 
     def random(
         self, 

@@ -10,22 +10,22 @@ import functools
 import re
 # TODO
 import dataclasses
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional, TypeVar, Callable, ParamSpec # TODO !!!!!
 
-import optax
 
 # TODO rm
 # import gymnasium.spaces
 # import numpy
 
-from tensorspecs import TensorSpec, BoxSpec, TensorTableSpec, ShapeLike
-# TODO placeholder for now; implement upstream !!!!!
-from typing import Type, Optional # TODO !!!!!
-SpaceVar = Type
+from tensorspecs import TensorSpec, BoxSpec, TensorTableSpec, TensorTableLike, ShapeLike
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
 # ######################################
 
 
-
+import optax
 import einops
 import flax.nnx as nnx
 import flax.nnx.bridge as nnx_bridge
@@ -36,27 +36,9 @@ import jaxtyping as jt
 from . import gemma as _gemma
 from . import siglip as _siglip
 
-
 # TODO
-@dataclasses.dataclass(frozen=True)
-class RegexFilter:
-    """NNX Filter that matches paths using a regex.
-
-    By default, paths are joined with a `/` separator. This can be overridden by setting the `sep` argument.
-    """
-
-    pattern: str | re.Pattern
-    sep: str = "/"
-
-    def __post_init__(self):
-        if not isinstance(self.pattern, re.Pattern):
-            object.__setattr__(self, "pattern", re.compile(self.pattern))
-
-    def __call__(self, path: nnx.filterlib.PathParts, _: Any) -> bool:
-        joined_path = self.sep.join(str(x) for x in path)
-        assert isinstance(self.pattern, re.Pattern)
-        return self.pattern.fullmatch(joined_path) is not None
-
+from .utils import PathRegexFilter, nnx_frozen_jit
+    
 
 def make_attn_mask(input_mask, mask_ar):
     """Adapted from big_vision.
@@ -241,7 +223,7 @@ class Pi0(nnx.Module):
         self.action_out_proj = nnx.Linear(action_expert_config.width, config.numeric_state_size, rngs=rngs)
 
         # NOTE compat
-        self.PaliGemma = dict(
+        self.PaliGemma = nnx.Dict(
             llm=self.gemma_language_model, 
             img=self.siglip_vision_model,
         )
@@ -320,7 +302,7 @@ class Pi0(nnx.Module):
     def _embed_prefix(
         self, 
         # TODO typing!!!!
-        batch_observation: SpaceVar[ObservationSpec],
+        batch_observation: TensorTableLike[ObservationSpec],
     ) -> tuple[jt.Float[jt.Array, "b s emb"], jt.Bool[jt.Array, "b s"], jt.Bool[jt.Array, " s"]]:
         # TODO doc: batch(variable) tokens_len(variable) embedding_size
         # TODO 
@@ -394,8 +376,8 @@ class Pi0(nnx.Module):
     def _embed_suffix(
         self, 
         # TODO typing !!!!
-        batch_observation: SpaceVar[ObservationSpec],
-        batch_noisy_action: SpaceVar[ActionSpec],
+        batch_observation: TensorTableLike[ObservationSpec],
+        batch_noisy_action: TensorTableLike[ActionSpec],
         timestep: jt.Float[jt.Array, " b"],
     ) -> tuple[jt.Float[jt.Array, "b s emb"], jt.Bool[jt.Array, "b s"], jt.Bool[jt.Array, " s"]]:
         _, action_horizon, _ = batch_noisy_action["numeric_states"].shape
@@ -434,14 +416,14 @@ class Pi0(nnx.Module):
 
     # TODO
     # @override
-    # @nnx.jit
+    # @nnx_frozen_jit
     def sample_actions(
         self,
         rng: jt.PRNGKeyArray,
-        batch_observation: SpaceVar[ObservationSpec],
+        batch_observation: TensorTableLike[ObservationSpec],
         num_timesteps: int = 1,
         denoising_num_steps: int | jt.Int[jt.Array, ""] = 10,
-    ) -> SpaceVar[ActionSpec]:
+    ) -> TensorTableLike[ActionSpec]:
         """
         Compute actions given a batch of observations.
 
@@ -523,12 +505,12 @@ class Pi0(nnx.Module):
     
     # TODO typing
     # @override
-    @nnx.jit
+    # @nnx_frozen_jit
     def compute_loss(
         self, 
         rng: jt.PRNGKeyArray,
-        batch_observation: SpaceVar[ObservationSpec], 
-        batch_action: SpaceVar[ActionSpec], 
+        batch_observation: TensorTableLike[ObservationSpec], 
+        batch_action: TensorTableLike[ActionSpec], 
         # train: bool = False,
     ) -> jt.Float[jt.Array, "*b ah"]:
         # TODO
@@ -558,6 +540,10 @@ class Pi0(nnx.Module):
 
         return jnp.mean(jnp.square(v_t - u_t), axis=-1)
     
+    @functools.cache
+    def compile_jit(self, method: Callable[_P, _R], **jax_jit_kwds) -> Callable[_P, _R]:
+        return nnx_frozen_jit(method, **jax_jit_kwds)
+    
     # TODO
     @functools.cached_property
     def trainable_filter(self):
@@ -565,8 +551,8 @@ class Pi0(nnx.Module):
 
         filters = []
         has_lora = False
-        gemma_params_filter = RegexFilter(".*llm.*")
-        action_expert_params_filter = RegexFilter(".*llm.*_1.*")
+        gemma_params_filter = PathRegexFilter(".*llm.*")
+        action_expert_params_filter = PathRegexFilter(".*llm.*_1.*")
 
         if "lora" in config.paligemma_variant:
             filters.append(
@@ -587,7 +573,7 @@ class Pi0(nnx.Module):
         if has_lora:
             # If any lora is used, exclude all lora params.
             filters.append(
-                nnx.Not(RegexFilter(".*lora.*")),
+                nnx.Not(PathRegexFilter(".*lora.*")),
             )
 
         if not filters:
@@ -740,8 +726,8 @@ class Pi0Trainer(nnx.Module):
     def step(
         self,
         rng: jt.PRNGKeyArray,
-        batch_observation: SpaceVar[Pi0.ObservationSpec],
-        batch_action: SpaceVar[Pi0.ActionSpec],
+        batch_observation: TensorTableLike[Pi0.ObservationSpec],
+        batch_action: TensorTableLike[Pi0.ActionSpec],
     ) -> StepResult:
 
         # TODO
@@ -751,8 +737,8 @@ class Pi0Trainer(nnx.Module):
         def loss_fn(
             model: Pi0, 
             rng: jt.PRNGKeyArray, 
-            batch_observation: SpaceVar[Pi0.ObservationSpec], 
-            batch_action: SpaceVar[Pi0.ActionSpec],
+            batch_observation: TensorTableLike[Pi0.ObservationSpec], 
+            batch_action: TensorTableLike[Pi0.ActionSpec],
         ):
             chunked_loss = model.compute_loss(
                 batch_observation=batch_observation, 

@@ -485,6 +485,7 @@ class Pi0Controller:
     def nn(self):
         return self._nn
     
+    # TODO FIXME perf: jit the whole thing
     # TODO Impl[ObservationSpec]
     def compute_action(
         self, 
@@ -532,7 +533,10 @@ class Pi0Controller:
         if rng is None:
             rng = jax.random.key(0)
 
-        batch_actions_nn = self._nn.sample_actions(
+        batch_actions_nn = self._nn.compile_jit(
+            self._nn.sample_actions,
+            static_argnames=("num_timesteps", "denoising_num_steps"),
+        )(
             rng=rng, 
             batch_observation=batch_observation_nn,
             num_timesteps=num_timesteps,
