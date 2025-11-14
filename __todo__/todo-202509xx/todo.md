@@ -574,3 +574,49 @@ isaac_physics_tensor_view = scene._isaac_physics_tensor_view
 ```
 
 
+```
+from typing import Type
+
+
+def usd_find_prims_by_type(
+    stage: "pxr.Usd.Stage", 
+    type: "Type[pxr.Usd.Typed]",
+):
+    return (x for x in stage.Traverse() if x.IsA(type))
+
+
+```
+
+
+
+```
+
+            # TODO
+            import os
+            import tempfile
+            with tempfile.TemporaryDirectory() as tmpdir:
+                prim_path_temp = urdf_interface.import_robot(
+                    assetRoot="",
+                    assetName="",
+                    robot=robot_model,
+                    importConfig=import_config,
+                    # TODO this doesnt do anything AT ALL!!!! still the opened stage!!!
+                    # stage=stage.GetEditTarget().GetLayer().identifier,
+                    stage=os.path.join(tmpdir, "robot.usd"),
+                )
+
+                pxr = scene._kernel.pxr
+
+                prim_stage = pxr.Usd.Stage.Open(os.path.join(tmpdir, "robot.usd"))
+                is_success = pxr.Sdf.CopySpec(
+                    prim_stage.GetRootLayer(), 
+                    prim_path_temp, 
+                    stage.GetEditTarget().GetLayer(), 
+                    prim_path,
+                )
+                # TODO
+                assert is_success
+
+                # TODO
+                raise NotImplementedError
+```

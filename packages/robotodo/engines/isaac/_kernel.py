@@ -243,10 +243,60 @@ class Kernel:
         return __import__(module)
 
 
+# TODO
+def enable_physx_deformable_beta(kernel: Kernel):
+    """
+    TODO doc
+
+    :param kernel: ...
+    """
+
+    import warnings
+
+    omni = kernel.omni
+    kernel.enable_extension("omni.physx")
+
+    settings = kernel.get_settings()
+    SETTING_ENABLE_DEFORMABLE_BETA = omni.physx.bindings._physx.SETTING_ENABLE_DEFORMABLE_BETA
+
+    if not settings.get(SETTING_ENABLE_DEFORMABLE_BETA):
+        settings.set(SETTING_ENABLE_DEFORMABLE_BETA, True)
+        warnings.warn(
+            f"Deformable Schema Beta was requested to be enabled in Omniverse. "
+            f"It has now been enabled (Restart may be required for the changes to take effect). "
+            f"For details see https://docs.omniverse.nvidia.com/kit/docs/omni_physics/107.3/dev_guide/deformables_beta/deformable_authoring.html#enable-deformable-schema-beta"
+        )
+
+
+# TODO
 import functools
+from typing import TypedDict, Optional, Unpack
 
 
-# TODO cache
+class KernelConfig(TypedDict):
+    extra_argv: Optional[list[str]]
+    kit_path: Optional[str]
+
+
+__kernel_config_default = KernelConfig(
+    kit_path="isaacsim.exp.full.kit",
+)
+def configure_default_kernel(
+    config: KernelConfig = KernelConfig(),
+    **config_kwds: Unpack[KernelConfig],
+):
+    __kernel_config_default.update({
+        **config,
+        **config_kwds,
+    })
+
+
 @functools.cache
 def get_default_kernel():
-    return Kernel(kit_path="isaacsim.exp.full.kit")
+    # TODO
+    kernel = Kernel(
+        extra_argv=__kernel_config_default.get("extra_argv", []),
+        kit_path=__kernel_config_default.get("kit_path", None),
+    )
+    kernel.start_app_loop_soon()
+    return kernel

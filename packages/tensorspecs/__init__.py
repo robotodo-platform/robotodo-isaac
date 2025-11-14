@@ -322,8 +322,8 @@ from typing import Any, Iterable, Mapping, Literal, Type, Hashable, Annotated, C
 import numpy
 
 # TODO !!!
-import jax
-TensorLike = jax.Array
+# import jax
+# TensorLike = jax.Array
 
 
 class TensorSpec(BaseSpec):
@@ -412,8 +412,8 @@ class TensorSpec(BaseSpec):
 
     def set(
         self, 
-        tensor: TensorLike, 
-        fill_value: TensorLike,
+        tensor: "TensorLike", 
+        fill_value: "TensorLike",
         indices: Mapping[Hashable, int | slice] = dict(),
         copy: bool = False,
     ):
@@ -429,7 +429,7 @@ class TensorSpec(BaseSpec):
     
     def get(
         self,
-        tensor: TensorLike,
+        tensor: "TensorLike",
         indices: Mapping[Hashable, int | slice] = dict(),
         copy: bool = False,
     ):
@@ -445,7 +445,7 @@ class TensorSpec(BaseSpec):
     def expand_dims(
         self, 
         expr: str | None = None,
-        tensor: TensorLike | None = None,
+        tensor: "TensorLike | None" = None,
         *,
         dims: Iterable[Hashable] | None = None,
         optional_dims: Collection[Hashable] | None = None,
@@ -488,7 +488,7 @@ class TensorSpec(BaseSpec):
             dtype=self.dtype,
         )
 
-    def shape_of(self, tensor: TensorLike):
+    def shape_of(self, tensor: "TensorLike"):
         return Shape.from_sizes(
             numpy.shape(tensor), 
             dims=self.dims, 
@@ -499,7 +499,7 @@ class TensorSpec(BaseSpec):
         self,
         # TODO ShapeLike
         sizes: Mapping[Hashable, int | Literal[-1] | None],
-        tensor: TensorLike | None = None,
+        tensor: "TensorLike | None" = None,
     ):
         # TODO
         if tensor is None:
@@ -528,12 +528,12 @@ class TensorSpec(BaseSpec):
         return numpy.reshape(tensor, out_shape)
 
     # TODO
-    def cast(self, tensor: TensorLike):
+    def cast(self, tensor: "TensorLike"):
         ...
         raise NotImplementedError
 
     # TODO
-    def fit(self, tensor: TensorLike):
+    def fit(self, tensor: "TensorLike"):
         dims = self.dims
         optional_dims = self.optional_dims
 
@@ -590,6 +590,20 @@ class TensorSpec(BaseSpec):
     # TODO !!!!!
     def validate(self):
         raise NotImplementedError
+
+from typing import Protocol, Mapping
+
+class TensorLike:
+    """
+    This protocol class describes any data structure that 
+    can be converted to a tensor.
+
+    TODO doc
+    
+    """
+
+    def __class_getitem__(cls, spec: TensorSpec | str | tuple[str, str | Type]):
+        return Annotated[Mapping, spec]
 
 
 from typing import Annotated, Mapping

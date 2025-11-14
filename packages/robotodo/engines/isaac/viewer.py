@@ -14,20 +14,8 @@ class SceneViewer:
         self._scene = scene
 
     # TODO
-    def open(self):
-        raise NotImplementedError
-
-    # TODO
-    def close(self):
-        raise NotImplementedError
-
-    # TODO
-    def play(self):
-        raise NotImplementedError
-
-    # TODO
-    def pause(self):
-        raise NotImplementedError
+    def show(self):
+        pass
 
     # TODO
     @property
@@ -35,10 +23,11 @@ class SceneViewer:
         omni = self._scene._kernel.omni
         # TODO
         selection = omni.usd.get_context().get_selection()
-
-        # TODO entity: support list
-        # return Entity(selection.get_selected_prim_paths(), scene=self._scene)
-
+        return Entity(selection.get_selected_prim_paths(), scene=self._scene)
+    
+    # TODO
+    @selected_entity.setter
+    def selected_entity(self, value: ...):
         raise NotImplementedError
 
     # TODO
@@ -113,3 +102,28 @@ class SceneViewer:
                 numpy.asarray(colors).tolist(), 
                 numpy.asarray(thicknesses).tolist(),
             )
+
+
+# TODO
+from robotodo.utils.geometry import export_trimesh
+
+# TODO
+class EntityViewer:
+    def __init__(self, entity: Entity):
+        self._entity = entity
+
+    def show(self):
+        # TODO
+        import itertools
+
+        import trimesh
+        import trimesh.viewer
+
+        return (
+            trimesh.Scene([
+                export_trimesh(g)
+                for g in itertools.chain(*self._entity.geometry)
+            ])
+            .show()
+        )
+

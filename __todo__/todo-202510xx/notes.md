@@ -1,24 +1,19 @@
+- USD commands: see [here](/home/sysadmin/lab/robotodo/.conda/lib/python3.11/site-packages/omni/data/Kit/kit/107.3/exts/3/omni.usd-1.13.10+8131b85d.lx64.r.cp311/omni/usd/commands/usd_commands.py)
+- physics: /home/sysadmin/lab/robotodo/.conda/lib/python3.11/site-packages/omni/data/Kit/Isaac-Sim Full/5.0/exts/3/omni.physx-107.3.18+107.3.1.lx64.r.cp311.u353/omni/physx/scripts/deformableUtils.py
+
+-
 ```
-    
-    # TODO rm
-    # TODO NOTE mandatory warmup
-    def hacky_ensure_render(self):
-        # TODO call on every stage opening event
-        settings = self.get_settings()
-        timeline = self.omni.timeline.acquire_timeline_interface()
-        play_simulations_orig = settings.get("/app/player/playSimulations")
-        settings.set("/app/player/playSimulations", False)
-        timeline.forward_one_frame()
-        timeline.rewind_one_frame()
-        settings.set("/app/player/playSimulations", play_simulations_orig)
+def usd_physics_body_get_kinematic_enabled(prim):
+    import pxr
 
-    # TODO
-    def render(self, num_passes: int = 1):
-        settings = self.get_settings()
-        play_simulations_orig = settings.get("/app/player/playSimulations")
-        settings.set("/app/player/playSimulations", False)
-        for _ in range(num_passes):
-            self._app_framework.update()
-        settings.set("/app/player/playSimulations", play_simulations_orig)
+    value_omni = False
+    if "OmniPhysicsBodyAPI" in prim.GetAppliedSchemas():
+        value_omni = prim.GetAttribute("omniphysics:kinematicEnabled").Get()
 
+    value = False
+    rigid_body_api = pxr.UsdPhysics.RigidBodyAPI(prim)
+    if rigid_body_api:
+        value = rigid_body_api.GetKinematicEnabledAttr().Get()
+
+    return value or value_omni
 ```

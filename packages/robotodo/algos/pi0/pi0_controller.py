@@ -13,7 +13,7 @@ from tensorspecs import TensorTableSpec, rescale
 from tensorspecs import TensorSpec, BoxSpec, TensorTableSpec, ShapeLike
 
 from .nn.pi0 import Pi0, Pi0Trainer
-from .nn.paligemma_tokenizer import PaligemmaTokenizer
+from .nn.tokenizers import Pi0Tokenizer
 
 
 def image_resize_transform(
@@ -118,6 +118,7 @@ class Pi0Controller:
                         "right_wrist_0_rgb",
                     ]
                 },
+                # TODO dofs
                 **{
                     ("joint", key): TensorSpec()
                     for key in range(32)
@@ -403,7 +404,7 @@ class Pi0Controller:
         self._action_spec = config["action_spec"]
         self._observation_spec = config["observation_spec"]
 
-        self._text_tokenizer = PaligemmaTokenizer()
+        self._text_tokenizer = Pi0Tokenizer()
 
         self._nn = config.get("nn", None)
         if self._nn is None:

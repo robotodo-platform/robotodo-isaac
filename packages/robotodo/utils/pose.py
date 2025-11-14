@@ -11,28 +11,52 @@ import einops
 
 # TODO typing
 # TODO ref https://graphicscompendium.com/opengl/18-lookat-matrix
-def lookat(eye: ..., center: ..., up: ...):
+# def lookat(eye: ..., center: ..., up_axis: ...):
+#     """
+#     TODO doc
+
+#     # >>> lookat([1, 1, 1], [0, 0, 0], up=[0, 0, 1])
+#     # >>> lookat([0, 1, 0], [0, 0, 0], up=[0, 0, 1])
+
+#     """
+
+#     # TODO float cast necesito?
+#     eye = numpy.asarray(eye, dtype="float")
+#     center = numpy.asarray(center, dtype="float")
+#     up_axis = numpy.asarray(up_axis, dtype="float")
+
+#     forward = center - eye
+#     forward /= numpy.linalg.norm(forward)
+
+#     u = numpy.cross(forward, up_axis)
+#     v = numpy.cross(u, forward)
+#     w = -forward
+
+#     # TODO +Z up +X forward !!!! instead of +Y up -Z forward
+#     return numpy.stack((u, v, w), axis=-1)
+
+# TODO https://www.scratchapixel.com/lessons/mathematics-physics-for-computer-graphics/lookat-function/framing-lookat-function.html
+def lookat(eye: ..., center: ..., up_axis: ...):
     """
-    TODO doc
+    TODO doc: right-handed coords: +X right, +Y up, +Z forward
 
-    # >>> lookat([1, 1, 1], [0, 0, 0], up=[0, 0, 1])
-    # >>> lookat([0, 1, 0], [0, 0, 0], up=[0, 0, 1])
-
+    https://docs.omniverse.nvidia.com/dev-guide/latest/programmer_ref/viewport/camera.html#look-at-a-prim
+    
     """
 
     # TODO float cast necesito?
     eye = numpy.asarray(eye, dtype="float")
     center = numpy.asarray(center, dtype="float")
-    up = numpy.asarray(up, dtype="float")
+    up_axis = numpy.asarray(up_axis, dtype="float")
 
     forward = center - eye
     forward /= numpy.linalg.norm(forward)
+    right = numpy.cross(up_axis, forward)
+    up = numpy.cross(forward, right)
 
-    u = numpy.cross(forward, up)
-    v = numpy.cross(u, forward)
-    w = -forward
-
-    return numpy.stack((u, v, w), axis=-1)
+    # TODO
+    return numpy.stack((forward, right, up), axis=-1)
+    # return numpy.stack((right, up, forward), axis=-1)
 
 
 # TODO
@@ -61,13 +85,13 @@ class Pose:
         return cls(
             p=p,
             q=scipy.spatial.transform.Rotation.from_matrix(
-                lookat(p, p_target, up=up_axis)
+                lookat(p, p_target, up_axis=up_axis)
             ).as_quat(),
         )
 
     # TODO support for rotation matrix as well?
     @classmethod
-    def from_matrix(cls, matrix):
+    def from_matrix(cls, matrix: ...):
         # TODO !!!!
         matrix = numpy.asarray(matrix)
         return cls(
@@ -79,7 +103,6 @@ class Pose:
         self,
         # TODO
         # other: ProtoPose,
-        *,
         p: ... = [0, 0, 0],
         q: ... = [0, 0, 0, 1],
         # radians: ... = [0, 0, 0],
@@ -102,9 +125,12 @@ class Pose:
         )
 
     # TODO
-    def facing(self, p):
-        # TODO
-        raise NotImplementedError
+    def facing(self, p: ..., up_axis: ... = [0, 0, 1]):
+        return Pose.from_lookat(
+            p=self.p,
+            p_target=p,
+            up_axis=up_axis,
+        )
 
     def rotated(self, angles):
         # raise NotImplementedError
@@ -157,7 +183,7 @@ class Pose:
     def degrees(self):
         return numpy.rad2deg(self.radians)
     
-    # TODO !!!
+    # TODO
     def to_matrix(self):
         p = numpy.asarray(self.p)
         q = numpy.asarray(self.q)
@@ -189,33 +215,3 @@ class Pose:
         )
         
 
-# TODO
-def _todo_test_pose():
-    a = Pose.from_matrix(
-        numpy.array([
-            [[0.0, -1.0, 0.0, 1.0],
-            [1.0,  0.0, 0.0, 2.0],
-            [0.0,  0.0, 1.0, 3.0],
-            [0.0,  0.0, 0.0, 1.0]],
-            
-            [[1.0, 0.0, 0.0, 4.0],
-            [0.0, 1.0, 0.0, 5.0],
-            [0.0, 0.0, 1.0, 6.0],
-            [0.0, 0.0, 0.0, 1.0]]
-        ])    
-    )
-
-    a.to_matrix()
-
-    Pose.from_matrix(
-        numpy.array([
-            [0.0, -1.0, 0.0, 1.0],
-            [1.0,  0.0, 0.0, 2.0],
-            [0.0,  0.0, 1.0, 3.0],
-            [0.0,  0.0, 0.0, 1.0],
-        ])
-    ).to_matrix()
-    # TODO
-    # Pose().inv()
-    # Pose(p=[1, 0, 0], q=[0, 0, 0, 1]) * Pose(p=[0, 0, 0], q=[0, 0, 0, 1])
-    # Pose(p=[0, 0, 0], q=[0, 0, 0, 1]).inv()

@@ -3,12 +3,47 @@ import functools
 import contextlib
 import asyncio
 
-from robotodo.engines.core.entity_selector import PathExpression, PathExpressionLike
+# TODO
+import numpy
+
+from robotodo.engines.core.path import PathExpression, PathExpressionLike
 # TODO
 from robotodo.utils.event import BaseSubscriptionPartialAsyncEventStream
 
 # TODO
 from ._kernel import Kernel, get_default_kernel
+# from ._utils import usd_get_stage_id
+
+# TODO
+from ._kernel import Kernel
+
+def usd_get_stage_id(stage: "pxr.Usd.Stage", kernel: Kernel):
+    pxr = kernel.pxr
+    stage_cache = pxr.UsdUtils.StageCache.Get()
+    if not stage_cache.Contains(stage):
+        return stage_cache.Insert(stage)
+    return stage_cache.GetId(stage)
+
+# TODO
+# _USD_PHYSICSSCENE_PATH_DEFAULT = "/PhysicsScene"
+# def usd_ensure_physics_scene(stage: "pxr.Usd.Stage", kernel: Kernel):
+#     pxr = kernel.pxr
+#     omni = kernel.omni
+#     kernel.enable_extension("omni.usd")
+
+#     has_physics_scene = False
+#     for prim in stage.Traverse():
+#         if prim.IsA(pxr.UsdPhysics.Scene):
+#             has_physics_scene = True
+#             break
+
+#     if not has_physics_scene:
+#         path = omni.usd.get_stage_next_free_path(
+#             stage, 
+#             path=self._USD_PHYSICSSCENE_PATH_DEFAULT,
+#             prepend_default_prim=False,
+#         )
+#         pxr.UsdPhysics.Scene.Define(stage, path)
 
 
 # TODO !!!! per stage???
@@ -42,7 +77,7 @@ class Scene:
     def __init__(self, _kernel: Kernel | None = None, _usd_stage_ref: ... = None):
         # TODO !!!!!
         if _kernel is None:
-            raise NotImplementedError("TODO")
+            _kernel = get_default_kernel()
         self._kernel = _kernel
         self._usd_stage_ref = _usd_stage_ref
 
@@ -55,6 +90,7 @@ class Scene:
 
         # TODO !!!
         stage = self._kernel.omni.usd.get_context().get_stage()
+        # TODO rm
         if stage is None:
             # TODO !!!!!  Stage opening or closing already in progress so async???
             self._kernel.omni.usd.get_context().new_stage()
@@ -63,17 +99,63 @@ class Scene:
         assert stage is not None
         return stage
     
+    @property
+    def _isaac_physx(self):
+        self._kernel.enable_extension("omni.physx")
+
+        physx = self._kernel.omni.physx.get_physx_interface()
+        # TODO attach stage
+
+        return physx
+    
+    # TODO FIXME perf
+    # TODO cache and ensure current stage !!!!
+    @property
+    def _isaac_physx_simulation(self):
+        self._kernel.enable_extension("omni.physx")
+
+        physx_sim = self._kernel.omni.physx.get_physx_simulation_interface()
+        # TODO util: usd_get_stage_id
+        # TODO FIXME: this causes timeline to stop working: 
+        # see: https://forums.developer.nvidia.com/t/omniverse-physx-time-stepping-blocking/284664/10
+        if False:
+            current_stage_id = usd_get_stage_id(self._usd_stage, kernel=self._kernel).ToLongInt()
+            if physx_sim.get_attached_stage() != current_stage_id:
+                if not physx_sim.attach_stage(current_stage_id):
+                    raise RuntimeError(
+                        f"Failed to attach USD stage {self._usd_stage} "
+                        f"to the PhysX simulation interface {physx_sim}. Is it valid?"
+                    )
+        return physx_sim
+    
+        # TODO check stage attachment
+        # stage_id = physx_sim.get_attached_stage()
+        # if stage_id == 0:
+        #     pass # get stage from omni
+        # stage_cache = scene._kernel.pxr.UsdUtils.StageCache.Get()
+        # stage_cache.Find(stage_cache.Id.FromLongInt(9223003))
+
     @functools.cached_property
     def _isaac_physics_tensor_view_cache(self):
+        omni = self._kernel.omni
+
         try:
             self._kernel.enable_extension("omni.physics.tensors")
-            # TODO FIXME stage_id !!!!!!
-            res = self._kernel.omni.physics.tensors.create_simulation_view("torch")
+
+            stage = self._usd_stage
+            # TODO NOTE this also starts the simulation
+            self._isaac_physx_simulation.flush_changes()
+            # TODO
+            res = omni.physics.tensors.create_simulation_view(
+                "torch",
+                # TODO FIXME this breaks urdf importer bc of multiple stages in cache
+                # stage_id=usd_get_stage_id(stage, kernel=self._kernel).ToLongInt(),
+            )
         except Exception as error:
             # TODO
             raise RuntimeError(
-                "Failed to create physics view. "
-                f"Does a prim of type `PhysicsScene` exist on {self._usd_stage}?"
+                "Failed to create physics view."
+                # f"Does a prim of type `PhysicsScene` exist on {self._usd_stage}?"
                 # TODO rm
                 # f"Make sure the physics simulation is running: call {self.timeline_play}"
             ) from error
@@ -87,29 +169,18 @@ class Scene:
             del self._isaac_physics_tensor_view_cache
         return self._isaac_physics_tensor_view_cache
     
-    # TODO FIXME perf
-    # TODO cache and ensure current stage !!!!
-    @property
-    def _isaac_physx_simulation(self):
-        self._kernel.enable_extension("omni.physx")
+    # TODO see https://github.com/isaac-sim/IsaacSim/issues/223
+    def _isaac_physics_tensor_ensure_sync(self):
+        if not self._isaac_physx.is_running():
+            self._isaac_physx.start_simulation()
+            # TODO call at least once: physx.update_simulation with non-zero dt
 
-        physx_sim = self._kernel.omni.physx.get_physx_simulation_interface()
-        # TODO FIXME: this causes timeline to stop working
-        # current_stage_id = self._kernel.pxr.UsdUtils.StageCache.Get().GetId(self._usd_current_stage).ToLongInt()
-        # if physx_sim.get_attached_stage() != current_stage_id:
-        #     if not physx_sim.attach_stage(current_stage_id):
-        #         raise RuntimeError(
-        #             f"Failed to attach USD stage {self._usd_current_stage} "
-        #             f"to the PhysX simulation interface {physx_sim}. Is it valid?"
-        #         )
-        return physx_sim
-    
-        # TODO check stage attachment
-        # stage_id = physx_sim.get_attached_stage()
-        # if stage_id == 0:
-        #     pass # get stage from omni
-        # stage_cache = scene._kernel.pxr.UsdUtils.StageCache.Get()
-        # stage_cache.Find(stage_cache.Id.FromLongInt(9223003))
+        self._isaac_physx.update_transformations(
+            updateToFastCache=True,
+            updateToUsd=True,
+            updateVelocitiesToUsd=True,
+            outputVelocitiesLocalSpace=True,
+        )
 
     def has(self, path: PathExpressionLike):    
         return len(self.resolve(path)) > 0
@@ -123,7 +194,7 @@ class Scene:
             self._usd_stage.GetPseudoRoot()
             # if path is None else
             # # TODO FIXME
-            # self._usd_current_stage.GetPrimAtPath(self.resolve(path))
+            # self._usd_stage.GetPrimAtPath(self.resolve(path))
         )
 
         return (
@@ -134,20 +205,20 @@ class Scene:
     def resolve(self, path: PathExpressionLike):
         return PathExpression(path).resolve(self.traverse())
 
-    # TODO !!!!
+    # TODO stage !!!!
     def copy(self, path: PathExpressionLike, target_path: PathExpressionLike):
+        isaacsim = self._kernel.isaacsim
+        self._kernel.enable_extension("isaacsim.core.cloner")
+
         path = PathExpression(path)
         target_path = PathExpression(target_path)
 
-        # TODO mv
-        self._kernel.enable_extension("isaacsim.core.cloner")
-
         # TODO check if dir
-        cloner = self._kernel.isaacsim.core.cloner.Cloner(stage=self._usd_stage)
+        cloner = isaacsim.core.cloner.Cloner(stage=self._usd_stage)
         source_prim_path = self.resolve(path)
         if len(source_prim_path) != 1:
             raise NotImplementedError("TODO")
-        source_prim_path = source_prim_path[0]
+        [source_prim_path] = source_prim_path
 
         cloner.clone(
             source_prim_path=source_prim_path,
@@ -156,25 +227,80 @@ class Scene:
 
         # raise NotImplementedError
 
-    def move(self, path: PathExpressionLike, target_path: PathExpressionLike):
-        path = PathExpression(path)
-        target_path = PathExpression(target_path)
+    # TODO
+    def rename(self, path: PathExpressionLike, target_path: PathExpressionLike):
+        omni = self._kernel.omni
+        # TODO
+        self._kernel.enable_extension("omni.usd")
+        self._kernel.enable_extension("omni.kit.commands")
 
-        raise NotImplementedError
+        paths = self.resolve(path)
+        target_paths = self.resolve(target_path)
+
+        if len(paths) != len(target_paths):
+            raise NotImplementedError("TODO")
+
+        # TODO
+        move_prims_command = omni.usd.commands.MovePrimsCommand(
+            paths_to_move={
+                path_single: target_path_single
+                for path_single, target_path_single in zip(paths, target_paths, strict=True)
+            },
+            stage_or_context=self._usd_stage,
+        )
+        move_prims_command.do()
+
+        # for path_single, target_path_single in zip(path, target_path, strict=True):
+        #     # TODO
+        #     is_success, _ = omni.kit.commands.execute(
+        #         "MovePrim",
+        #         path_from=path_single,
+        #         path_to=target_path_single,
+        #         stage_or_context=self._usd_stage,
+        #     )
+        #     if not is_success:
+        #         raise RuntimeError("TODO")
+
+    @functools.cached_property
+    def _isaac_timeline(self):
+        # TODO ensure current stage !!!!
+        omni = self._kernel.omni
+        self._kernel.enable_extension("omni.timeline")
+        self._kernel.import_module("omni.timeline")
+        return omni.timeline.acquire_timeline_interface()
+
+    @property
+    def autostepping(self):
+        timeline = self._isaac_timeline
+        return timeline.is_playing() and timeline.is_auto_updating()
+    
+    @autostepping.setter
+    def autostepping(self, value):
+        timeline = self._isaac_timeline
+        if value:
+            timeline.set_auto_update(True)
+            timeline.play()
+        else:
+            timeline.set_auto_update(False)
+            timeline.pause()
 
     # TODO
     # TODO ref https://docs.omniverse.nvidia.com/kit/docs/omni_physics/108.0/dev_guide/simulation_control/simulation_control.html
-
     # TODO cannot reproduce: ~~this messes up the timeline for some reason !!!!!!!!~~
     # TODO api: support time??
-    async def step(self, timestep: float = 1 / 60):
-        if float(timestep) == 0:
-            return
-        physx_sim = self._isaac_physx_simulation
-        physx_sim.simulate(elapsed_time=float(timestep), current_time=0.)
-        # NOTE this ensures the enqueued `.simulate` gets processed
-        # and yes, this is non-async!
-        physx_sim.fetch_results()
+    async def step(self, timestep: float | None = None):
+        if timestep is None:
+            timestep = 1 / 60
+
+        if timestep != 0:
+            # TODO
+            physx_sim = self._isaac_physx_simulation
+            physx_sim.simulate(elapsed_time=float(timestep), current_time=0.)
+            # NOTE this ensures the enqueued `.simulate` gets processed
+            # and yes, this is non-async!
+            physx_sim.fetch_results()
+
+        return timestep
     
     # TODO 
     async def reset(self):
@@ -184,14 +310,20 @@ class Scene:
     @functools.cached_property
     def on_step(self):
         return PhysicsStepAsyncEventStream(scene=self)
-    
-    # TODO this should be render??
-    # @property
-    # def on_render(self):
-    #     raise NotImplementedError
-    
+
     # TODO convenience
     @functools.cached_property
     def viewer(self):
         from .viewer import SceneViewer
         return SceneViewer(scene=self)
+
+    # TODO FIXME unit
+    @property
+    def gravity(self):
+        # TODO tensor backend
+        return numpy.asarray(self._isaac_physics_tensor_view.get_gravity())
+    
+    @gravity.setter
+    def gravity(self, value: ...):
+        # TODO tensor backend
+        self._isaac_physics_tensor_view.set_gravity(numpy.broadcast_to(value, 3))

@@ -9,19 +9,13 @@ TODO
 import functools
 # TODO
 import dataclasses
-from typing import Any, Mapping, Optional, TypeVar, Callable, ParamSpec # TODO !!!!!
-
-
-# TODO rm
-# import gymnasium.spaces
-# import numpy
-
-from tensorspecs import TensorSpec, BoxSpec, TensorTableSpec, TensorTableLike, ShapeLike
-
+from typing import Any, Mapping, Optional, TypeVar, Callable, ParamSpec, Literal # TODO !!!!!
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
-# ######################################
+from tensorspecs import TensorSpec, BoxSpec, TensorTableSpec, TensorTableLike, ShapeLike
+
+
 
 
 import optax
@@ -169,13 +163,16 @@ class Pi0(nnx.Module):
         """TODO doc"""
 
         dtype: str = "bfloat16"
+        variant: Literal["pi0", "pi05"] = "pi0"
         paligemma_variant: _gemma.Variant = "gemma_2b"
         action_expert_variant: _gemma.Variant = "gemma_300m"
 
     def __init__(
         self, 
         rngs: nnx.Rngs,
-        config: Config = Config(), 
+        config: Config = Config(),
+        # TODO NOTE flax.nnx convention
+        deterministic: bool = True,
     ):
         """
         TODO doc
@@ -188,16 +185,28 @@ class Pi0(nnx.Module):
         action_expert_config = _gemma.get_config(config.action_expert_variant)
 
         # TODO: rewrite gemma in NNX. For now, use bridge.
-        self.gemma_language_model = nnx_bridge.ToNNX(
-            _gemma.Module(
-                configs=[paligemma_config, action_expert_config],
-                embed_dtype=config.dtype,
-            )
-        )
-        # TODO
-        self.gemma_language_model.lazy_init(rngs=rngs, method="init")
+        match config.variant:
+            case "pi0":
+                gemma_language_model = nnx_bridge.ToNNX(
+                    _gemma.Module(
+                        configs=[paligemma_config, action_expert_config],
+                        embed_dtype=config.dtype,
+                    )
+                )
+                gemma_language_model.lazy_init(rngs=rngs, method="init", use_adarms=[False, False])
+            case "pi05":
+                gemma_language_model = nnx_bridge.ToNNX(
+                    _gemma.Module(
+                        configs=[paligemma_config, action_expert_config],
+                        embed_dtype=config.dtype,
+                        adarms=True,
+                    )
+                )
+                gemma_language_model.lazy_init(rngs=rngs, method="init", use_adarms=[False, True])
+            case _:
+                raise ValueError(f"TODO {config.variant}")
 
-        self.siglip_vision_model = nnx_bridge.ToNNX(
+        siglip_vision_model = nnx_bridge.ToNNX(
             _siglip.Module(
                 num_classes=paligemma_config.width,
                 variant="So400m/14",
@@ -206,8 +215,7 @@ class Pi0(nnx.Module):
                 dtype_mm=config.dtype,
             )
         )
-        # TODO FIXME: this keeps recompiling!!!!!
-        self.siglip_vision_model.lazy_init(
+        siglip_vision_model.lazy_init(
             # TODO NOTE the batch size isnt actually correct; but the model only cares about the image shape
             jnp.empty((1, *(config.image_shape[key] for key in ["height", "width", "channels"]))),
             train=False,
@@ -215,17 +223,26 @@ class Pi0(nnx.Module):
             method="init",
         )
 
-        self.state_proj = nnx.Linear(config.numeric_state_size, action_expert_config.width, rngs=rngs)
-        self.action_in_proj = nnx.Linear(config.numeric_state_size, action_expert_config.width, rngs=rngs)
-        self.action_time_mlp_in = nnx.Linear(2 * action_expert_config.width, action_expert_config.width, rngs=rngs)
-        self.action_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
-        self.action_out_proj = nnx.Linear(action_expert_config.width, config.numeric_state_size, rngs=rngs)
-
         # NOTE compat
         self.PaliGemma = nnx.Dict(
-            llm=self.gemma_language_model, 
-            img=self.siglip_vision_model,
+            llm=gemma_language_model, 
+            img=siglip_vision_model,
         )
+
+        self.action_in_proj = nnx.Linear(config.numeric_state_size, action_expert_config.width, rngs=rngs)
+        match config.variant:
+            case "pi0":
+                self.state_proj = nnx.Linear(config.numeric_state_size, action_expert_config.width, rngs=rngs)
+                self.action_time_mlp_in = nnx.Linear(2 * action_expert_config.width, action_expert_config.width, rngs=rngs)
+                self.action_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
+            case "pi05":
+                self.time_mlp_in = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
+                self.time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
+            case _:
+                raise ValueError(f"TODO {config.variant}")
+        self.action_out_proj = nnx.Linear(action_expert_config.width, config.numeric_state_size, rngs=rngs)
+
+        self.deterministic = deterministic
 
     # TODO 
     @classmethod
@@ -295,10 +312,18 @@ class Pi0(nnx.Module):
         return self.ActionSpec(
             numeric_state_size=self._config.numeric_state_size,
         )
+    
+    @property
+    def gemma_language_model(self):
+        return self.PaliGemma["llm"]
+
+    @property
+    def siglip_vision_model(self):
+        return self.PaliGemma["img"]
 
     # @jt.typecheck
     # @nnx.jit
-    def _embed_prefix(
+    def embed_prefix(
         self, 
         # TODO typing!!!!
         batch_observation: TensorTableLike[ObservationSpec],
@@ -372,46 +397,112 @@ class Pi0(nnx.Module):
     # @jt.typecheck
     # TODO typing !!~!!!!!
     # @nnx.jit
-    def _embed_suffix(
+    def embed_suffix(
         self, 
         # TODO typing !!!!
         batch_observation: TensorTableLike[ObservationSpec],
         batch_noisy_action: TensorTableLike[ActionSpec],
         timestep: jt.Float[jt.Array, " b"],
-    ) -> tuple[jt.Float[jt.Array, "b s emb"], jt.Bool[jt.Array, "b s"], jt.Bool[jt.Array, " s"]]:
+    ) -> tuple[
+        jt.Float[jt.Array, "b s emb"], 
+        jt.Bool[jt.Array, "b s"], 
+        jt.Bool[jt.Array, " s"],
+        jt.Float[jt.Array, "b emb"] | None,
+    ]:
         _, action_horizon, _ = batch_noisy_action["numeric_states"].shape
 
         input_mask = []
         ar_mask = []
         tokens = []
 
-        # add a single state token
-        state_token = self.state_proj(batch_observation["numeric_state"])[:, None, :]
-        tokens.append(state_token)
-        input_mask.append(jnp.ones((batch_observation["numeric_state"].shape[0], 1), dtype=jnp.bool_))
+        match self._config.variant:
+            case "pi0":
+                # add a single state token
+                state_token = self.state_proj(batch_observation["numeric_state"])[:, None, :]
+                tokens.append(state_token)
 
-        # image/language inputs do not attend to state or actions
-        ar_mask += [True]
+                input_mask.append(jnp.ones((batch_observation["numeric_state"].shape[0], 1), dtype=jnp.bool_))
+                # image/language inputs do not attend to state or actions
+                ar_mask += [True]
 
-        # embed timestep using sine-cosine positional encoding with sensitivity in the range [0, 1]
-        time_emb = posemb_sincos(timestep, self.action_in_proj.out_features, min_period=4e-3, max_period=4.0)
-        # mix timestep + action information using an MLP
-        action_tokens = self.action_in_proj(batch_noisy_action["numeric_states"])
-        # TODO !!!!
-        time_tokens = einops.repeat(time_emb, "b emb -> b s emb", s=action_horizon)
-        action_time_tokens = jnp.concatenate([action_tokens, time_tokens], axis=-1)
-        action_time_tokens = self.action_time_mlp_in(action_time_tokens)
-        action_time_tokens = nnx.swish(action_time_tokens)
-        action_time_tokens = self.action_time_mlp_out(action_time_tokens)
-        tokens.append(action_time_tokens)
-        input_mask.append(jnp.ones(action_time_tokens.shape[:2], dtype=jnp.bool_))
+                # embed timestep using sine-cosine positional encoding with sensitivity in the range [0, 1]
+                time_emb = posemb_sincos(timestep, self.action_in_proj.out_features, min_period=4e-3, max_period=4.0)
+                # mix timestep + action information using an MLP
+                action_tokens = self.action_in_proj(batch_noisy_action["numeric_states"])
+                time_tokens = einops.repeat(time_emb, "b emb -> b s emb", s=action_horizon)
+                action_time_tokens = jnp.concatenate([action_tokens, time_tokens], axis=-1)
+                action_time_tokens = self.action_time_mlp_in(action_time_tokens)
+                action_time_tokens = nnx.swish(action_time_tokens)
+                action_time_tokens = self.action_time_mlp_out(action_time_tokens)
+
+                action_expert_tokens = action_time_tokens
+                adarms_cond = None
+                
+            case "pi05":
+                action_tokens = self.action_in_proj(batch_noisy_action["numeric_states"])
+                # embed timestep using sine-cosine positional encoding with sensitivity in the range [0, 1]
+                time_emb = posemb_sincos(timestep, self.action_in_proj.out_features, min_period=4e-3, max_period=4.0)
+                
+                # time MLP (for adaRMS)
+                time_emb = self.time_mlp_in(time_emb)
+                time_emb = nnx.swish(time_emb)
+                time_emb = self.time_mlp_out(time_emb)
+                time_emb = nnx.swish(time_emb)
+                action_expert_tokens = action_tokens
+                adarms_cond = time_emb
+
+            case _:
+                raise ValueError("TODO")
+
+        tokens.append(action_expert_tokens)
+        input_mask.append(jnp.ones(action_expert_tokens.shape[:2], dtype=jnp.bool_))
         # image/language/state inputs do not attend to action tokens
         ar_mask += [True] + ([False] * (action_horizon - 1))
         tokens = jnp.concatenate(tokens, axis=1)
         input_mask = jnp.concatenate(input_mask, axis=1)
         ar_mask = jnp.array(ar_mask)
 
-        return tokens, input_mask, ar_mask
+        return tokens, input_mask, ar_mask, adarms_cond
+
+    # TODO typing
+    # @override
+    # @nnx_frozen_jit
+    def compute_loss(
+        self, 
+        rng: jt.PRNGKeyArray,
+        batch_observation: TensorTableLike[ObservationSpec], 
+        batch_action: TensorTableLike[ActionSpec], 
+        # train: bool = False,
+    ) -> jt.Float[jt.Array, "*b ah"]:
+        # TODO
+        preprocess_rng, noise_rng, time_rng = jax.random.split(rng, 3)
+        # TODO rm
+        # observation = _model.preprocess_observation(preprocess_rng, observation, train=train)
+
+        batch_size, action_horizon, _ = batch_action["numeric_states"].shape
+
+        noise = jax.random.normal(noise_rng, batch_action["numeric_states"].shape)
+        time = jax.random.beta(time_rng, 1.5, 1, (batch_size, )) * 0.999 + 0.001
+        time_expanded = time[..., None, None]
+        x_t = time_expanded * noise + (1 - time_expanded) * batch_action["numeric_states"]
+        u_t = noise - batch_action["numeric_states"]
+
+        # one big forward pass of prefix + suffix at once
+        prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(batch_observation)
+        suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(batch_observation, {"numeric_states": x_t}, time)
+        input_mask = jnp.concatenate([prefix_mask, suffix_mask], axis=1)
+        ar_mask = jnp.concatenate([prefix_ar_mask, suffix_ar_mask], axis=0)
+        attn_mask = make_attn_mask(input_mask, ar_mask)
+        positions = jnp.cumsum(input_mask, axis=1) - 1
+        (prefix_out, suffix_out), _ = self.gemma_language_model(
+            [prefix_tokens, suffix_tokens], 
+            mask=attn_mask, 
+            positions=positions,
+            adarms_cond=[None, adarms_cond],
+        )
+        v_t = self.action_out_proj(suffix_out[:, -action_horizon :])
+
+        return jnp.mean(jnp.square(v_t - u_t), axis=-1)
 
     # TODO
     # @override
@@ -424,11 +515,11 @@ class Pi0(nnx.Module):
         denoising_num_steps: int | jt.Int[jt.Array, ""] = 10,
     ) -> TensorTableLike[ActionSpec]:
         """
-        Compute actions given a batch of observations.
+        Compute a batch of time stepped actions given a batch of observations.
 
         :param rng: JAX PRNG key for random number generation.
         :param batch_observation: Batch of observations to compute actions for.
-        :param num_timesteps: Number of action timesteps.
+        :param num_timesteps: Number of action time steps.
         :param denoising_num_steps: Number of denoising steps.
         :return: Batch of actions.
 
@@ -458,14 +549,14 @@ class Pi0(nnx.Module):
         # action_horizon, action_dim = self._config.action_spec["numeric_states"].shape
 
         # first fill KV cache with a forward pass of the prefix
-        prefix_tokens, prefix_mask, prefix_ar_mask = self._embed_prefix(batch_observation)
+        prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(batch_observation)
         prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
         positions = jnp.cumsum(prefix_mask, axis=1) - 1
         _, kv_cache = self.gemma_language_model([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
 
         def step(carry: tuple[float, float]):
             x_t, time = carry
-            suffix_tokens, suffix_mask, suffix_ar_mask = self._embed_suffix(
+            suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(
                 batch_observation, {"numeric_states": x_t}, jnp.broadcast_to(time, batch_size)
             )
             # `suffix_attn_mask` is shape (b, suffix_len, suffix_len) indicating how the suffix tokens can attend to each
@@ -486,7 +577,11 @@ class Pi0(nnx.Module):
             positions = jnp.sum(prefix_mask, axis=-1)[:, None] + jnp.cumsum(suffix_mask, axis=-1) - 1
 
             (prefix_out, suffix_out), _ = self.gemma_language_model(
-                [None, suffix_tokens], mask=full_attn_mask, positions=positions, kv_cache=kv_cache
+                [None, suffix_tokens], 
+                mask=full_attn_mask, 
+                positions=positions, 
+                kv_cache=kv_cache, 
+                adarms_cond=[None, adarms_cond],
             )
             assert prefix_out is None
             v_t = self.action_out_proj(suffix_out[:, -num_timesteps:])
@@ -502,43 +597,7 @@ class Pi0(nnx.Module):
         x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
         return {"numeric_states": x_0}
     
-    # TODO typing
-    # @override
-    # @nnx_frozen_jit
-    def compute_loss(
-        self, 
-        rng: jt.PRNGKeyArray,
-        batch_observation: TensorTableLike[ObservationSpec], 
-        batch_action: TensorTableLike[ActionSpec], 
-        # train: bool = False,
-    ) -> jt.Float[jt.Array, "*b ah"]:
-        # TODO
-        preprocess_rng, noise_rng, time_rng = jax.random.split(rng, 3)
-        # TODO rm
-        # observation = _model.preprocess_observation(preprocess_rng, observation, train=train)
-
-        batch_size, action_horizon, _ = batch_action["numeric_states"].shape
-
-        noise = jax.random.normal(noise_rng, batch_action["numeric_states"].shape)
-        time = jax.random.beta(time_rng, 1.5, 1, (batch_size, )) * 0.999 + 0.001
-        time_expanded = time[..., None, None]
-        x_t = time_expanded * noise + (1 - time_expanded) * batch_action["numeric_states"]
-        u_t = noise - batch_action["numeric_states"]
-
-        # one big forward pass of prefix + suffix at once
-        prefix_tokens, prefix_mask, prefix_ar_mask = self._embed_prefix(batch_observation)
-        suffix_tokens, suffix_mask, suffix_ar_mask = self._embed_suffix(batch_observation, {"numeric_states": x_t}, time)
-        input_mask = jnp.concatenate([prefix_mask, suffix_mask], axis=1)
-        ar_mask = jnp.concatenate([prefix_ar_mask, suffix_ar_mask], axis=0)
-        attn_mask = make_attn_mask(input_mask, ar_mask)
-        positions = jnp.cumsum(input_mask, axis=1) - 1
-        (prefix_out, suffix_out), _ = self.gemma_language_model(
-            [prefix_tokens, suffix_tokens], mask=attn_mask, positions=positions
-        )
-        v_t = self.action_out_proj(suffix_out[:, -action_horizon :])
-
-        return jnp.mean(jnp.square(v_t - u_t), axis=-1)
-    
+    # TODO deprecate once nnx.jit fixes memory issues
     @functools.cache
     def compile_jit(self, method: Callable[_P, _R], **jax_jit_kwds) -> Callable[_P, _R]:
         return nnx_frozen_jit(method, **jax_jit_kwds)

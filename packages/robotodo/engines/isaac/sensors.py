@@ -11,12 +11,13 @@ from typing import Any, Literal, NamedTuple
 import warp
 # import torch
 from robotodo.utils.pose import Pose
-from robotodo.engines.core.entity_selector import PathExpressionLike, PathExpression
+from robotodo.engines.core.path import PathExpressionLike, PathExpression
 
 from .scene import Scene
 from ._utils import USDPrimHelper
 
 
+# TODO FIXME illegal mem: sanity check!!!!!
 @warp.kernel
 def _reshape_tiled_image_kernel(
     tiled_image: Any,
@@ -130,21 +131,71 @@ class Camera:
         self._path = PathExpression(path)
         self._scene = scene
 
-        # self._resolution = self.Resolution(height=256, width=256)
-
     # TODO
     @functools.cached_property
-    def __usd_prim_helper(self):
+    def _usd_prim_helper(self):
         # TODO
         return USDPrimHelper(path=self._path, scene=self._scene)
     
     @property
+    def _usd_prims(self):
+        return self._usd_prim_helper._usd_prims
+    
+    @property
     def pose(self):
-        return self.__usd_prim_helper.pose
-
+        return self._usd_prim_helper.pose
+    
     @pose.setter
     def pose(self, value: Pose):
-        self.__usd_prim_helper.pose = value
+        self._usd_prim_helper.pose = value
+
+    @property
+    def pose_in_parent(self):
+        return self._usd_prim_helper.pose_in_parent
+    
+    @pose_in_parent.setter
+    def pose_in_parent(self, value: Pose):
+        self._usd_prim_helper.pose_in_parent = value
+    
+
+    # # TODO NOTE usd uses diff coords for cams: impl in __usd_prim_helper instead??
+    # # TODO https://docs.isaacsim.omniverse.nvidia.com/5.0.0/reference_material/reference_conventions.html#world-axes
+    # # TODO https://docs.isaacsim.omniverse.nvidia.com/5.0.0/reference_material/reference_conventions.html#default-camera-axes
+    # @property
+    # def pose(self):
+    #     pose_w_cam_u = self._usd_prim_helper.pose
+
+    #     # TODO
+    #     # from World camera convention to USD camera convention
+    #     # TODO https://github.com/isaac-sim/IsaacSim/blob/21bbdbad07ba31687f2ff71f414e9d21a08e16b8/source/extensions/isaacsim.sensors.camera/isaacsim/sensors/camera/camera_view.py#L35
+    #     import numpy
+    #     U_W_TRANSFORM = numpy.asarray([
+    #         [0, -1, 0, 0], 
+    #         [0, 0, 1, 0], 
+    #         [-1, 0, 0, 0], 
+    #         [0, 0, 0, 1],
+    #     ])
+
+    #     return pose_w_cam_u * Pose.from_matrix(U_W_TRANSFORM)
+
+    # # TODO bug upstream in Pose??
+    # @pose.setter
+    # def pose(self, value: Pose):
+    #     pose_w_cam_w = value
+
+    #     # TODO
+    #     # from USD camera convention to World camera convention
+    #     # TODO https://github.com/isaac-sim/IsaacSim/blob/21bbdbad07ba31687f2ff71f414e9d21a08e16b8/source/extensions/isaacsim.sensors.camera/isaacsim/sensors/camera/camera_view.py#L32
+    #     import numpy
+    #     W_U_TRANSFORM = numpy.asarray([
+    #         [0, 0, -1, 0], 
+    #         [-1, 0, 0, 0], 
+    #         [0, 1, 0, 0], 
+    #         [0, 0, 0, 1],
+    #     ])
+        
+    #     self._usd_prim_helper.pose = pose_w_cam_w * Pose.from_matrix(W_U_TRANSFORM)
+
 
     # TODO mv to _Kernel and handle caching
     # TODO caching
@@ -155,7 +206,6 @@ class Camera:
         return (
             self._scene._kernel.omni.replicator.core.create
             .render_product_tiled(
-                # TODO FIXME this MUST be a list of concrete paths!!!!
                 self._scene.resolve(self._path), 
                 tile_resolution=(resolution.width, resolution.height),
             )
@@ -172,7 +222,6 @@ class Camera:
             .GetTargets()
         )
     
-    _RESOLUTION_DEFAULT = Resolution(256, 256)
     _IsaacRenderName = Literal["rgb", "distance_to_image_plane"] | str
 
     @functools.cache
@@ -203,7 +252,7 @@ class Camera:
             # NOTE ensure the data is available IMMEDIATELY after this function call
             # TODO ref omni.replicator.core.scripts.annotators.Annotator.get_data
             await omni.replicator.core.orchestrator.step_async(
-                rt_subframes=1, 
+                # rt_subframes=1, 
                 delta_time=0, 
                 wait_for_render=True,
             )
@@ -247,6 +296,8 @@ class Camera:
         # TODO perf: this has a constant us-level overhead!!!!
         return warp.to_torch(res)
     
+    _RESOLUTION_DEFAULT = Resolution(256, 256)
+
     # TODO
     async def read_rgba(self, resolution: Resolution | tuple[int, int] = _RESOLUTION_DEFAULT):
         resolution = self.Resolution._make(resolution)
@@ -256,3 +307,25 @@ class Camera:
     async def read_depth(self, resolution: Resolution | tuple[int, int] = _RESOLUTION_DEFAULT):
         resolution = self.Resolution._make(resolution)
         return await self._isaac_get_frame(name="distance_to_image_plane", resolution=resolution)
+
+    @property
+    def viewer(self):
+        return CameraViewer(self)
+    
+
+class CameraViewer:
+    def __init__(self, camera: Camera):
+        self._camera = camera
+
+    def show(self):
+        # TODO
+        import asyncio
+
+        import matplotlib.pyplot as plt
+
+        async def todo():
+            rgbas = await self._camera.read_rgba()
+            for rgba in rgbas:
+                plt.imshow(rgba.to(device="cpu"))
+
+        asyncio.get_running_loop().run_until_complete(todo())

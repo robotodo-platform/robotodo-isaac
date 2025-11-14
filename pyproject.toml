@@ -17,11 +17,23 @@ dependencies = [
     "wcmatch",
     # TODO
     "einops",
+    "scipy",
 
     # TODO tensorspecs
     "jax",
     "jaxtyping",
+]
 
+[project.optional-dependencies]
+engines_isaac = [
+    # TODO 
+    "torch",
+    # TODO
+    "nest_asyncio",
+    "isaacsim[all,extscache]>=5.0.0,<=6.0.0",
+    "warp-lang",
+]
+algos_pi0 = [
     # TODO mv pi0
     "jax",
     "jaxtyping",
@@ -33,13 +45,12 @@ dependencies = [
     "sentencepiece",
     "platformdirs",
 ]
-
-[project.optional-dependencies]
-features = [
-    # TODO
-    "nest_asyncio",
-    "isaacsim[all]>=5.0.0,<=6.0.0",
-    "warp-lang",
+algos_pi0_test = [
+    "openpi-client @ git+https://github.com/Physical-Intelligence/openpi.git#subdirectory=packages/openpi-client",
+    "openpi @ git+https://github.com/Physical-Intelligence/openpi.git",
+    "pytest",
+]
+algos_motion_planning = [    
     # TODO
     # TODO cc1plus error: conda install -c conda-forge cxx-compiler
     "ninja", # NOTE required for jit compilation of curobo torch exts

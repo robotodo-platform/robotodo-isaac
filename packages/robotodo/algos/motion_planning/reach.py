@@ -1,5 +1,6 @@
 import os
 import functools
+import warnings
 
 # TODO NOTE seealso https://curobo.org/notes/07_environment_variables.html
 os.environ.setdefault("CUROBO_TORCH_CUDA_GRAPH_RESET", "1")
@@ -39,44 +40,54 @@ class ReachPlanner:
     observation_spec = TensorTableSpec({
         "dof_positions": TensorSpec("n? dof"),
         # "target_pose": PoseSpec("n?"),
+        # "target_pose_candidates": PoseSpec("n? candidate"),
         # "obstacles": ...,
     })
 
     action_spec = TensorTableSpec({
+        # TODO -or- namedtensor??
+        # "dof_names": TensorSpec("dof"),
         "dof_positions": TensorSpec("time n? dof"),
         "dof_velocities": TensorSpec("time n? dof"),
     })
 
+    # TODO cache with purpose to avoid cuda error: "plan", "plan_goalset"
+    # TODO allow urdf input
     # TODO allow custom ee link
-    def __init__(self, _todo_robot_config: dict):
+    def __init__(self, _todo_robot_config: dict | MotionGen):
         ...
 
-        # TODO
-        self._curobo_motion_gen = MotionGen(
-            MotionGenConfig.load_from_robot_config(
-                # robot_cfg=RobotConfig.from_basic(
-                #     # TODO '/home/sysadmin/lab/robotodo/.conda/lib/python3.11/site-packages/isaacsim/exts/isaacsim.asset.importer.urdf/data/urdf/robots/franka_description/robots/panda_arm_hand.urdf'
-                #     urdf_path=panda_arm_hand_urdf_path,
-                #     base_link="panda_link0",
-                #     ee_link="panda_link7",
-                #     # ee_link="panda_leftfinger",
-                # ),
-                robot_cfg=_todo_robot_config,
-                # world_model=WorldConfig(
-                #     # TODO
-                #     # mesh=curobo_meshes,
-                # ),
-                # world_model=obstacles.get_collision_check_world(),
-                # interpolation_dt=1 / 250,
-                interpolation_dt=1 / 60,
-                # num_trajopt_seeds=1,
-                num_graph_seeds=1,
-                # TODO requires %env CUROBO_TORCH_CUDA_GRAPH_RESET=1
-                # TODO NOTE seealso https://curobo.org/notes/07_environment_variables.html
-                use_cuda_graph=is_cuda_graph_available() and is_cuda_graph_reset_available(),
-                # use_cuda_graph=False,
-            )
-        )
+        match _todo_robot_config:
+            case dict():
+                # TODO
+                self._curobo_motion_gen = MotionGen(
+                    MotionGenConfig.load_from_robot_config(
+                        # robot_cfg=RobotConfig.from_basic(
+                        #     # TODO '/home/sysadmin/lab/robotodo/.conda/lib/python3.11/site-packages/isaacsim/exts/isaacsim.asset.importer.urdf/data/urdf/robots/franka_description/robots/panda_arm_hand.urdf'
+                        #     urdf_path=panda_arm_hand_urdf_path,
+                        #     base_link="panda_link0",
+                        #     ee_link="panda_link7",
+                        #     # ee_link="panda_leftfinger",
+                        # ),
+                        robot_cfg=_todo_robot_config,
+                        # world_model=WorldConfig(
+                        #     # TODO
+                        #     # mesh=curobo_meshes,
+                        # ),
+                        # world_model=obstacles.get_collision_check_world(),
+                        # interpolation_dt=1 / 250,
+                        interpolation_dt=1 / 60,
+                        # num_trajopt_seeds=1,
+                        num_graph_seeds=1,
+                        # TODO requires %env CUROBO_TORCH_CUDA_GRAPH_RESET=1
+                        # TODO NOTE seealso https://curobo.org/notes/07_environment_variables.html
+                        use_cuda_graph=is_cuda_graph_available() and is_cuda_graph_reset_available(),
+                        # use_cuda_graph=False,
+                    )
+                )                
+            case MotionGen():
+                # TODO
+                self._curobo_motion_gen = _todo_robot_config
 
     def compute_action(
         self, 
@@ -126,11 +137,6 @@ class ReachPlanner:
             raise RuntimeError(
                 f"An error occurred while planning: are the DOF positions valid?"
             ) from error
-        
-
-        # TODO check
-        plan_result.success
-        plan_result.status
 
         # TODO
         # plan_result.interpolated_plan.position
@@ -138,6 +144,9 @@ class ReachPlanner:
 
         if plan_result.optimized_plan is None:
             raise MotionPlanningError(f"Failed to generate optimized plan: {plan_result.status}")
+
+        if plan_result.success is None or not torch.all(plan_result.success):
+            warnings.warn(f"Motion planning is partially successful: {plan_result.status}")
 
         dof_positions_result = plan_result.optimized_plan.position
         # NOTE curobo auto-squeezes the result which must be undone!

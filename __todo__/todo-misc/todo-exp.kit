@@ -14,6 +14,12 @@ keywords = ["experience", "app", "usd"] # That makes it browsable in UI with "ex
 # TODO
 "omni.hydra.usdrt_delegate" = {}
 
+
+"omni.physx.tensors" = {}
+"omni.replicator.core" = {}
+"omni.replicator.replicator_yaml" = {}
+"omni.syntheticdata" = {}
+
 [settings]
 exts."omni.kit.material.library".ui_show_list = [
     "OmniPBR",
@@ -22,7 +28,7 @@ exts."omni.kit.material.library".ui_show_list = [
     "USD Preview Surface",
 ]
 exts."omni.kit.renderer.core".present.enabled = false # Fixes MGPU stability issue
-exts."omni.kit.viewport.window".windowMenu.entryCount = 2 # Allow user to create two viewports by default
+#exts."omni.kit.viewport.window".windowMenu.entryCount = 2 # Allow user to create two viewports by default
 exts."omni.kit.viewport.window".windowMenu.label = "" # Put Viewport menuitem under Window menu
 exts."omni.rtx.window.settings".window_menu = "Window" # Where to put the render settings menuitem
 exts."omni.usd".locking.onClose = false # reduce time it takes to close/create stage
@@ -69,14 +75,15 @@ show_menu_titles = true
 name = "Isaac-Sim Base"
 version = "5.1.0"
 versionFile = "${app}/../VERSION"
-content.emptyStageOnStart = true
+#content.emptyStageOnStart = true
+content.emptyStageOnStart = false
 fastShutdown = true
 file.ignoreUnsavedOnExit = true
 font.file = "${fonts}/OpenSans-SemiBold.ttf"
 font.size = 16
 gatherRenderResults = true # True to prevent artifacts in multiple viewport configurations, can be set to false for better performance in some cases
-hangDetector.enabled = true
-hangDetector.timeout = 120
+#hangDetector.enabled = true
+#hangDetector.timeout = 120
 settings.fabricDefaultStageFrameHistoryCount = 3 # needed for omni.syntheticdata TODO105 still true?
 settings.persistent = true                       # settings are persistent for this app
 useFabricSceneDelegate = true                    # use FSD by default for better performance
@@ -91,6 +98,27 @@ vulkan = true # Enable Vulkan by default for all platforms
 asyncRendering = false
 asyncRenderingLowLatency = false
 
+
+# TODO
+omni.replicator.asyncRendering = true
+app.asyncRendering = true
+app.asyncRenderingLowLatency = true
+
+[exts."omni.kit.viewport.window"]
+startup.disableWindowOnLoad = true
+
+# Disable other UI panel extensions
+[exts."omni.kit.window.extensions"]
+startup.dockTabInvisible = true
+
+[exts."omni.kit.window.content_browser"]
+startup.dockTabInvisible = true
+
+[exts."omni.kit.window.preferences"]
+startup.dockTabInvisible = true
+
+[exts."omni.kit.window.stage"]
+startup.dockTabInvisible = true
 
 [settings.app.renderer]
 resolution.height = 720

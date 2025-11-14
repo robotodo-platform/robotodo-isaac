@@ -1,5 +1,5 @@
 
-from .entity_selector import PathExpression, PathExpressionLike
+from .path import PathExpression, PathExpressionLike
 
 
 __all__ = [

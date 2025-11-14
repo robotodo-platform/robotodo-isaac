@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import dataclasses
 import functools
+import warnings
 
 import numpy
 import torch
@@ -9,10 +10,15 @@ import torch
 from robotodo.utils.pose import Pose
 from robotodo.utils.geometry import PolygonMesh
 from robotodo.utils.event import BaseSubscriptionPartialAsyncEventStream
-from robotodo.engines.core.entity_selector import PathExpression, PathExpressionLike
+from robotodo.engines.core.entity import EntityBodyKind
+from robotodo.engines.core.path import PathExpression, PathExpressionLike
 
-from .scene import Scene
-from ._utils import USDPrimHelper
+from robotodo.engines.isaac.scene import Scene
+from robotodo.engines.isaac.material import Material
+# from robotodo.engines.isaac._utils import USDPrimHelper
+# TODO
+from robotodo.engines.isaac._utils_next import USDPrimRef, USDPrimPathExpressionRef, USDPrimHelper
+
 
 
 # TODO TensorTable
@@ -106,8 +112,12 @@ class EntityContactAsyncEventStream(
                 path_entity0 = pxr.PhysicsSchemaTools.intToSdfPath(contact_header.collider0)
                 path_entity1 = pxr.PhysicsSchemaTools.intToSdfPath(contact_header.collider1)
 
+                # TODO FIXME perf
                 # TODO match ancesters as well?
-                if not (self._entity._path.match(str(path_entity0)) or self._entity._path.match(str(path_entity1))):
+                if any(
+                    str(path) not in self._entity._usd_prim_helper.prim_paths
+                    for path in (path_entity0, path_entity1)
+                ):
                     continue
 
                 entity0 = Entity(path_entity0, scene=scene)
@@ -196,14 +206,58 @@ class EntityContactAsyncEventStream(
         sub.unsubscribe()
 
 
-class RigidBody:
+class EntityCollision:
+    def __init__(self, entity: "Entity"):
+        self._entity = entity
+
+    @property
+    def enabled(self):
+        pxr = self._entity._scene._kernel.pxr
+
+        value = []
+
+        for prim in self._entity._usd_prims:
+            if not prim.HasAPI(pxr.UsdPhysics.CollisionAPI):
+                value.append(False)
+            else:
+                api = pxr.UsdPhysics.CollisionAPI(prim)
+                value.append(bool(
+                    api.CreateCollisionEnabledAttr().Get()
+                ))
+
+        return numpy.asarray(value)
+
+    @enabled.setter
+    def enabled(self, value):
+        pxr = self._entity._scene._kernel.pxr
+
+        prims = self._entity._usd_prims
+
+        for prim, v in zip(
+            prims,
+            numpy.broadcast_to(value, shape=len(prims)),
+        ):
+            if not prim.HasAPI(pxr.UsdPhysics.CollisionAPI):
+                api = pxr.UsdPhysics.CollisionAPI.Apply(prim)
+            else:
+                api = pxr.UsdPhysics.CollisionAPI(prim)
+            api.CreateCollisionEnabledAttr().Set(bool(v))
+
+    @functools.cached_property
+    def on_contact(self):
+        # TODO
+        return EntityContactAsyncEventStream(self._entity)
+
+
+# TODO deprecate
+class EntityRigidBody:
     def __init__(self, entity: "Entity"):
         self._entity = entity
     
     @functools.cached_property
     def _isaac_physics_rigid_body_view_cache(self):
         try:
-            paths = self._entity._scene.resolve(self._entity._path)
+            paths = self._entity._usd_prim_helper.prim_paths
             self._entity._scene._isaac_physx_simulation.flush_changes()
             isaac_physics_tensor_view = self._entity._scene._isaac_physics_tensor_view
             rigid_body_view = (
@@ -269,6 +323,7 @@ class RigidBody:
                 api = pxr.UsdPhysics.RigidBodyAPI(prim)
             api.CreateRigidBodyEnabledAttr().Set(bool(v))
         
+    # TODO is this relevant?? https://docs.omniverse.nvidia.com/kit/docs/omni_physics/108.1/dev_guide/rigid_bodies_articulations/rigid_bodies.html#automatic-computation-of-rigid-body-mass-distribution
     @property
     def mass(self):
         return self._isaac_physics_rigid_body_view.get_masses()
@@ -301,56 +356,109 @@ class RigidBody:
 
 
 # TODO
-class DeformableBody:
+# TODO https://docs.omniverse.nvidia.com/kit/docs/omni_physics/107.3/dev_guide/deformables_beta/physx_deformable_schema.html
+
+# TODO deprecate
+class EntityDeformableBody:
     def __init__(self, entity: "Entity"):
         self._entity = entity
         raise NotImplementedError
 
 
+# TODO
 class Entity:
-    # TODO support usd prims directly??
-    def __init__(self, path: PathExpressionLike, scene: Scene, _usd_prims_ref: ... = None):
-        if _usd_prims_ref is not None:
-            # TODO
-            raise NotImplementedError
-
+    # TODO
+    @classmethod
+    def _from_usd_prim_ref(cls, ref: USDPrimRef, scene: Scene, _label: ... = None):
+        self = cls.__new__(cls)
+        self._label = _label
         self._scene = scene
-        self._path = PathExpression(path)
+        self._usd_prim_helper = USDPrimHelper(
+            ref=ref,
+            kernel=scene._kernel,
+        )
+        return self
 
-        self._usd_prims_ref = _usd_prims_ref
-        
-    def __repr__(self):
-        return f"{Entity.__qualname__}({str(self._path)!r}, scene={self._scene!r})"
+    def __init__(self, path: PathExpressionLike, scene: Scene, _label: ... = None):
+        self._label = _label
+        self._scene = scene
+        # TODO
+        # self._usd_prim_ref = ...
+        self._usd_prim_helper = USDPrimHelper(
+            ref=USDPrimPathExpressionRef(path, stage_ref=lambda: scene._usd_stage),
+            kernel=scene._kernel,
+        )
+
+    @property
+    def label(self):
+        return self._label
+
+    # TODO rm
+    # def __init__(self, path: PathExpressionLike, scene: Scene, _usd_prims_ref: ... = None):
+    #     if _usd_prims_ref is not None:
+    #         # TODO
+    #         raise NotImplementedError
+    #     self._scene = scene
+    #     self._path = PathExpression(path)
+    #     self._usd_prims_ref = _usd_prims_ref
+    #
+    # TODO rm
+    # @functools.cached_property
+    # def _usd_prim_helper(self):
+    #     # TODO
+    #     return USDPrimHelper(
+    #         path=self._path, 
+    #         scene=self._scene, 
+    #         _usd_prims_ref=self._usd_prims_ref,
+    #     )
+
+    # TODO
+    # def __repr__(self):
+    #     # TODO
+    #     self._usd_prim_helper._prims_ref
+    #     return f"{Entity.__qualname__}({str(self._path)!r}, scene={self._scene!r})"
 
     @functools.cached_property
-    def __usd_prim_helper(self):
-        # TODO
-        return USDPrimHelper(path=self._path, scene=self._scene, _usd_prims_ref=self._usd_prims_ref)
-
-    # TODO FIXME performance thru prim obj caching
+    def viewer(self):
+        # TODO mv here !!!
+        from .viewer import EntityViewer
+        return EntityViewer(self)
+    
+    # TODO
     @property
-    # TODO invalidate !!!!!
-    # @functools.cached_property
+    def _usd_prims_ref(self):
+        return self._usd_prim_helper._prims_ref
+
+    @property
     def _usd_prims(self):
-        return self.__usd_prim_helper._usd_prims
+        return self._usd_prim_helper.prims
+    
+    # TODO
+    @property
+    def path(self):
+        return self._usd_prim_helper.prim_paths
     
     @property
     def pose(self):
-        return self.__usd_prim_helper.pose
+        return self._usd_prim_helper.pose
     
     @pose.setter
     def pose(self, value: Pose):
-        self.__usd_prim_helper.pose = value
+        self._usd_prim_helper.pose = value
 
+    @property
+    def pose_in_parent(self):
+        return self._usd_prim_helper.pose_in_parent
+    
+    @pose_in_parent.setter
+    def pose_in_parent(self, value: Pose):
+        self._usd_prim_helper.pose_in_parent = value
+
+    # TODO not all children are included???
     # TODO scaling
     # TODO optimize: instanceable assets may have shared geoms
     @property
     def geometry(self):
-        """
-        TODO doc
-        
-        """
-
         # TODO
         pxr = self._scene._kernel.pxr
 
@@ -359,12 +467,13 @@ class Entity:
 
         geoms = []
 
-        for prim in self.__usd_prim_helper._usd_prims:
+        for prim in self._usd_prim_helper.prims:
             prim_geoms = []
 
+            # TODO apply world xform as well????
             prim_scale_factors = (
                 pxr.Gf.Transform(
-                    self.__usd_prim_helper._usd_xform_cache
+                    self._usd_prim_helper._xform_cache(prim.GetStage())
                     .GetLocalToWorldTransform(prim)
                 )
                 .GetScale()
@@ -405,49 +514,74 @@ class Entity:
             geoms.append(prim_geoms)
 
         return geoms
+    
+    # TODO
+    @functools.cached_property
+    def material(self):
+        pxr = self._scene._kernel.pxr
+
+        def _material_prims_ref(scene: Scene):
+            prims = self._usd_prims
+            material_apis, _ = pxr.UsdShade.MaterialBindingAPI.ComputeBoundMaterials(prims)
+            
+            material_prims = []
+            for prim, material_api in zip(prims, material_apis):
+                if not material_api:
+                    # TODO
+                    warnings.warn(f"USD prim does not have a material applied: {prim}")
+                material_prims.append(material_api.GetPrim())
+
+            return material_prims
+
+        return Material(_material_prims_ref, scene=self._scene)
+
+    @functools.cached_property
+    def collision(self):
+        return EntityCollision(self)
 
     @property
-    def collidable(self):
+    def body_kind(self):
         pxr = self._scene._kernel.pxr
 
-        value = []
+        res = []
 
         for prim in self._usd_prims:
-            if not prim.HasAPI(pxr.UsdPhysics.CollisionAPI):
-                value.append(False)
-            else:
-                api = pxr.UsdPhysics.CollisionAPI(prim)
-                value.append(bool(
-                    api.CreateCollisionEnabledAttr().Get()
-                ))
+            v = EntityBodyKind.NONE
 
-        return numpy.asarray(value)
+            for schema in prim.GetAppliedSchemas():
+                match schema:
+                    case "PhysicsRigidBodyAPI":
+                        if (
+                            pxr.UsdPhysics.RigidBodyAPI(prim)
+                            .GetRigidBodyEnabledAttr()
+                            .Get()
+                        ):
+                            v = EntityBodyKind.RIGID
+                    case "OmniPhysicsVolumeDeformableSimAPI":
+                        if (
+                            prim
+                            .GetAttribute("omniphysics:deformableBodyEnabled")
+                            .Get()
+                        ):
+                            v = EntityBodyKind.DEFORMABLE_VOLUME
+                    case "OmniPhysicsSurfaceDeformableSimAPI":
+                        if (
+                            prim
+                            .GetAttribute("omniphysics:deformableBodyEnabled")
+                            .Get()
+                        ):
+                            v = EntityBodyKind.DEFORMABLE_SURFACE
 
-    @collidable.setter
-    def collidable(self, value):
-        pxr = self._scene._kernel.pxr
+            res.append(v.value)
 
-        prims = self._usd_prims
+        return numpy.asarray(res)
 
-        for prim, v in zip(
-            prims,
-            numpy.broadcast_to(value, shape=len(prims)),
-        ):
-            if not prim.HasAPI(pxr.UsdPhysics.CollisionAPI):
-                api = pxr.UsdPhysics.CollisionAPI.Apply(prim)
-            else:
-                api = pxr.UsdPhysics.CollisionAPI(prim)
-            api.CreateCollisionEnabledAttr().Set(bool(v))
 
+    # TODO deprecate
     @functools.cached_property
     def rigid_body(self):
-        return RigidBody(self)
-    
+        return EntityRigidBody(self)
     @functools.cached_property
     def soft_body(self):
-        return DeformableBody(self)
-
-    @functools.cached_property
-    def on_contact(self):
-        return EntityContactAsyncEventStream(self)
-
+        return EntityDeformableBody(self)
+    # TODO deprecate
