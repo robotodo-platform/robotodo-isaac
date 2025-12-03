@@ -3,7 +3,6 @@ import abc
 import enum
 import asyncio
 from typing import TypedDict, Unpack
-from types import EllipsisType
 
 from tensorspecs import TensorLike
 from robotodo.engines.core.path import PathExpressionLike
@@ -172,17 +171,15 @@ class ProtoArticulation(ProtoEntity, abc.ABC):
 
     # TODO
     @property
-    # @abc.abstractmethod
+    @abc.abstractmethod
     def pose(self) -> Pose:
         ...
-        raise NotImplementedError
 
     # TODO
     @property
-    # @abc.abstractmethod
+    @abc.abstractmethod
     def pose_in_parent(self) -> Pose:
         ...
-        raise NotImplementedError
 
     @property
     @abc.abstractmethod

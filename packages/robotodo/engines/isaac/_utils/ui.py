@@ -175,16 +175,16 @@ def omni_enable_editing_experience(kernel: Kernel):
                                     "visible": True,
                                     "width": 1866.666748046875,
                                 },
-                                {
-                                    "dock_id": 4,
-                                    "height": 554.6666870117188,
-                                    "position_x": 0.0,
-                                    "position_y": 22.666667938232422,
-                                    "selected_in_dock": False,
-                                    "title": "Robotics Examples",
-                                    "visible": True,
-                                    "width": 1866.666748046875,
-                                },
+                                # {
+                                #     "dock_id": 4,
+                                #     "height": 554.6666870117188,
+                                #     "position_x": 0.0,
+                                #     "position_y": 22.666667938232422,
+                                #     "selected_in_dock": False,
+                                #     "title": "Robotics Examples",
+                                #     "visible": True,
+                                #     "width": 1866.666748046875,
+                                # },
                                 {
                                     "dock_id": 4,
                                     "height": 554.6666870117188,
@@ -229,16 +229,16 @@ def omni_enable_editing_experience(kernel: Kernel):
                                     "visible": True,
                                     "width": 692.0,
                                 },
-                                {
-                                    "dock_id": 7,
-                                    "height": 655.3333740234375,
-                                    "position_x": 1868.0,
-                                    "position_y": 22.666667938232422,
-                                    "selected_in_dock": False,
-                                    "title": "Render Settings",
-                                    "visible": True,
-                                    "width": 692.0,
-                                },
+                                # {
+                                #     "dock_id": 7,
+                                #     "height": 655.3333740234375,
+                                #     "position_x": 1868.0,
+                                #     "position_y": 22.666667938232422,
+                                #     "selected_in_dock": False,
+                                #     "title": "Render Settings",
+                                #     "visible": True,
+                                #     "width": 692.0,
+                                # },
                             ],
                             "dock_id": 7,
                             "position": "TOP",
@@ -269,10 +269,6 @@ def omni_enable_editing_experience(kernel: Kernel):
             "dock_id": 3358485147,
         }
     ]
-
-    # TODO
-    ...
-
 
     omni = kernel.omni
     kernel.enable_extension("omni.ui")

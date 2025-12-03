@@ -1,9 +1,9 @@
 format: jb-book
 root: content/front-page
 parts:
-- caption: User Guide
+- caption: Manuals
   chapters:
-  - glob: content/user-guide/*
+  - glob: content/manuals/*
 - caption: References
   chapters:
   - glob: content/references/*

@@ -1,4 +1,9 @@
 # TODO
+import os
+# TODO NOTE seealso https://curobo.org/notes/07_environment_variables.html
+os.environ.setdefault("CUROBO_TORCH_CUDA_GRAPH_RESET", "1")
+
+# TODO
 import functools
 import warnings
 from typing import Callable, TypedDict, Unpack, NotRequired

@@ -149,11 +149,6 @@ def usd_add_reference(
         stage.GetRootLayer().identifier, sdf_layer.identifier, stage_id,
     )
     should_use_add_reference_command = ret_val["ret_val"] != 0
-    if not should_use_add_reference_command:
-        # TODO
-        warnings.warn(f"TODO: {stage} {sdf_layer}")
-    # TODO 
-    should_use_add_reference_command = True
 
     prims = []
 
@@ -203,6 +198,9 @@ def usd_import_urdf(
     kernel: Kernel,
 ):
     pxr = kernel.pxr
+    # TODO
+    # TODO NOTE BUG isaacsim.asset.importer.urdf prior to 2.4.27 has `.rotateMeshX` for `.dae` files which causes the links to be rotated!!!
+    # https://github.com/isaac-sim/IsaacSim/commit/e680e71274626b275d5dbe755f04ccdea7bbe97c#diff-8f3f54a270af13942c9904d254c27992c5eed50f6addf95ce31060ea97c1c0ffL267
     kernel.enable_extension("isaacsim.asset.importer.urdf")
     isaacsim = kernel.import_module("isaacsim.asset.importer.urdf")
 
@@ -274,11 +272,6 @@ class USDStageRef(Protocol):
 # TODO 
 def is_usd_stage_ref(ref: USDStageRef | Any):
     return isinstance(ref, Callable)
-
-
-# TODO rm
-# USDPrimRef = Callable[[], list["pxr.Usd.Prim"]]
-# USDStageRef = Callable[[], "pxr.Usd.Stage"]
 
 
 # TODO FIXME perf:

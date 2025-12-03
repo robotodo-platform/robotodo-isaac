@@ -415,8 +415,8 @@ class SceneViewer:
                 settings.set("/app/window/hideUi", True)
             case "editing":
                 # TODO
-                omni_enable_editing_experience(kernel=self._scene._kernel)
                 settings.set("/app/window/hideUi", False)
+                omni_enable_editing_experience(kernel=self._scene._kernel)
                 # TODO start editing extension
             case _:
                 raise ValueError(f"TODO")

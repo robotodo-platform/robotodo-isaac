@@ -10,7 +10,7 @@ name = "robotodo"
 dynamic = ["version"]
 requires-python = ">=3.11"
 readme = "README.md"
-license = {file = "LICENSE.txt"}
+license = "Apache-2.0"
 dependencies = [
     # TODO
     "bracex",
@@ -33,14 +33,19 @@ easy = [
 engines_isaac = [
     # TODO 
     "torch",
+    "numpy",
+    "warp-lang",
+    "einops",
     # TODO
     "nest_asyncio",
     # TODO rm??
     #"isaacsim[all,extscache]>=5.0.0,<6.0.0",
-    "isaacsim-core>=5.0.0,<6.0.0",
-    # TODO
+    #"isaacsim-core>=5.0.0,<6.0.0",
+    # TODO NOTE limited to numpy v1 due to omni?
+    "numpy>=1.0.0,<2.0.0",
+    # TODO NOTE omniverse-kit 107.3.3 required by some isaacsim exts is missing from PyPI
     #"omniverse-kit>=107.0.0,<110.0.0",
-    "warp-lang",
+    "isaacsim-kernel>=5.0.0,<6.0.0",
 ]
 algos_pi0 = [
     # TODO mv pi0
@@ -75,7 +80,8 @@ lint = [
     "ruff",
 ]
 docs = [
-    "jupyter-book",
+    # TODO version
+    "jupyter-book>=1.0.0,<2.0.0",
     "sphinxcontrib-mermaid",
 ]
 
