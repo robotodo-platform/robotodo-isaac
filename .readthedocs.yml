@@ -4,17 +4,9 @@ build:
   tools:
     python: "3.11"
   jobs:
-    pre_build:
-      - "jupyter-book config sphinx docs/"
-
-python:
-   install:
-     - method: pip
-       path: .
-       extra_requirements:
-         - docs
-
-sphinx:
-  builder: html
-  configuration: docs/conf.py
-  fail_on_warning: false
+    install:
+      - pip install --verbose .[docs]
+    build:
+      html:
+        - jupyter-book build --builder html --warningiserror --path-output $READTHEDOCS_OUTPUT/html/ docs/
+  
