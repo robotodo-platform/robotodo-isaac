@@ -50,7 +50,7 @@ by running the following command:
   python3 -m robotodo.engines.isaac
 
 Allow a few minutes for the app to initialize. If nothing goes wrong
-you should see a window that looks much similar to this: [#ref-omniverse-kit-ui]
+you should see a window that looks much similar to this: [#ref-omniverse-kit-ui]_
 
 .. image:: https://docs.omniverse.nvidia.com/kit/docs/kit-app-template/108.0/_images/graphical_kit_app_stack.png
 
