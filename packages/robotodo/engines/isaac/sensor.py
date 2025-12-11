@@ -1,6 +1,7 @@
-"""
-TODO
+# SPDX-License-Identifier: Apache-2.0
 
+"""
+Sensor.
 """
 
 
@@ -9,7 +10,7 @@ from typing import Any, Literal, NamedTuple
 
 # TODO
 import warp
-# import torch
+import torch
 import einops
 from robotodo.utils.pose import Pose
 from robotodo.engines.core.path import (
@@ -40,7 +41,7 @@ class Camera(ProtoCamera):
 
     @classmethod
     def create(cls, ref, scene: Scene):
-        pxr = scene._kernel.pxr
+        pxr = scene._kernel._pxr
         prims = [
             pxr.UsdGeom.Camera.Define(scene._usd_stage, path).GetPrim()
             for path in PathExpression(ref).expand()
@@ -166,14 +167,14 @@ class Camera(ProtoCamera):
     # TODO caching
     @functools.cache
     def _isaac_get_render_product(self, resolution: Resolution):
-        self._scene._kernel.enable_extension("omni.replicator.core")
+        self._scene._kernel._omni_enable_extension("omni.replicator.core")
         # TODO
 
         # # TODO Run a preview to ensure the replicator graph is initialized??
         # omni.replicator.core.orchestrator.preview()
         # TODO customizable!!!!!!!
         return (
-            self._scene._kernel.omni.replicator.core.create
+            self._scene._kernel._omni.replicator.core.create
             .render_product_tiled(
                 [
                     prim.GetPath().pathString 
@@ -212,8 +213,8 @@ class Camera(ProtoCamera):
 
         """
         
-        omni = self._scene._kernel.omni
-        self._scene._kernel.enable_extension("omni.replicator.core")
+        omni = self._scene._kernel._omni
+        self._scene._kernel._omni_enable_extension("omni.replicator.core")
 
         return (
             omni.replicator.core.AnnotatorRegistry
@@ -259,16 +260,17 @@ class Camera(ProtoCamera):
 
         while True:
             # TODO
-            omni = self._scene._kernel.omni
-            self._scene._kernel.enable_extension("omni.replicator.core")
+            omni = self._scene._kernel._omni
+            self._scene._kernel._omni_enable_extension("omni.replicator.core")
 
-            # TODO
+            # TODO ensure kernel running?
+            self._scene._kernel.run_forever()
             await omni.replicator.core.orchestrator.step_async(
                 # rt_subframes=1, 
                 delta_time=0, 
                 pause_timeline=False,
                 wait_for_render=True,
-            )            
+            )
 
             frame_tiled = render_annotator.get_data(
                 # TODO
@@ -339,7 +341,9 @@ class Camera(ProtoCamera):
     # TODO
     async def read_rgba(self, resolution: Resolution | tuple[int, int] = _RESOLUTION_DEFAULT):
         resolution = self.Resolution._make(resolution)
-        return await self._isaac_get_frame(name="rgb", resolution=resolution)
+        return torch.as_tensor(
+            await self._isaac_get_frame(name="rgb", resolution=resolution)
+        ) / 255
 
     # TODO FIXME upstream: tiled output channel optional 
     async def read_depth(self, resolution: Resolution | tuple[int, int] = _RESOLUTION_DEFAULT):

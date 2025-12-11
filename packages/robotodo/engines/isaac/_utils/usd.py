@@ -6,7 +6,7 @@ from typing import Optional, TypedDict, Unpack
 import numpy
 from robotodo.engines.core.path import PathExpressionLike
 from robotodo.utils.geometry import ProtoGeometry, Plane, Box, Sphere, PolygonMesh
-from robotodo.engines.isaac._kernel import Kernel, get_default_kernel
+from robotodo.engines.isaac.kernel import Kernel, get_running_kernel
 
 
 def usd_ensure_free_path(
@@ -17,15 +17,15 @@ def usd_ensure_free_path(
     kernel: Kernel | None = None,
 ):
     if kernel is None:
-        kernel = get_default_kernel()
+        kernel = get_running_kernel()
 
-    omni = kernel.omni
+    omni = kernel._omni
 
     if path is not None:
         if remove_existing:
-            kernel.enable_extension("omni.usd")
-            kernel.enable_extension("omni.kit.commands")
-            kernel.import_module("omni.usd")
+            kernel._omni_enable_extension("omni.usd")
+            kernel._omni_enable_extension("omni.kit.commands")
+            kernel._omni_import_module("omni.usd")
 
             # TODO call only when not exists
             # TODO check success??
@@ -56,22 +56,24 @@ def usd_create_stage(
     kernel: Kernel | None = None,
 ) -> "pxr.Usd.Stage":
     if kernel is None:
-        kernel = get_default_kernel()
+        kernel = get_running_kernel()
+        # TODO
+        # kernel = default_kernel.ensure_running()
 
-    pxr = kernel.pxr
-    kernel.import_module("pxr.Usd")
-    kernel.import_module("pxr.UsdGeom")
+    pxr = kernel._pxr
+    kernel._omni_import_module("pxr.Usd")
+    kernel._omni_import_module("pxr.UsdGeom")
 
     stage = pxr.Usd.Stage.CreateInMemory()
     # TODO customizable!!!  also necesito???
     pxr.UsdGeom.SetStageUpAxis(stage, pxr.UsdGeom.Tokens.z)
 
-    # TODO this attaches the stage to the viewer and inits rendering+physics?
-    # TODO FIXME rm in the future when: 1) urdf stage= bug has been fixed 2) users are informed of the behavior
-    kernel.enable_extension("omni.usd")
-    # TODO
-    import asyncio
-    asyncio.ensure_future(kernel.omni.usd.get_context().attach_stage_async(stage))
+    # # TODO this attaches the stage to the viewer and inits rendering+physics?
+    # # TODO FIXME rm in the future when: 1) urdf stage= bug has been fixed 2) users are informed of the behavior
+    # kernel._omni_enable_extension("omni.usd")
+    # # TODO
+    # import asyncio
+    # asyncio.ensure_future(kernel._omni.usd.get_context().attach_stage_async(stage))
 
     return stage
 
@@ -82,14 +84,14 @@ def usd_load_stage(
     kernel: Kernel | None = None,
 ) -> "pxr.Usd.Stage":
     if kernel is None:
-        kernel = get_default_kernel()
+        kernel = get_running_kernel()
 
-    pxr = kernel.pxr
-    kernel.import_module("pxr.Usd")
-    kernel.import_module("pxr.UsdGeom")
+    pxr = kernel._pxr
+    kernel._omni_import_module("pxr.Usd")
+    kernel._omni_import_module("pxr.UsdGeom")
 
     # TODO NOTE this allows remote urls to work?
-    kernel.enable_extension("omni.usd_resolver")
+    kernel._omni_enable_extension("omni.usd_resolver")
 
     if as_sublayer:
         stage = pxr.Usd.Stage.CreateInMemory()
@@ -99,13 +101,13 @@ def usd_load_stage(
     else:
         stage = pxr.Usd.Stage.Open(resource)
 
-    # TODO this attaches the stage to the viewer and inits rendering+physics?
-    # TODO FIXME rm in the future when: 1) urdf stage= bug has been fixed 2) users are informed of the behavior
-    kernel.enable_extension("omni.usd")
-    kernel.import_module("omni.usd")
-    # TODO
-    import asyncio
-    asyncio.ensure_future(kernel.omni.usd.get_context().attach_stage_async(stage))
+    # # TODO this attaches the stage to the viewer and inits rendering+physics?
+    # # TODO FIXME rm in the future when: 1) urdf stage= bug has been fixed 2) users are informed of the behavior
+    # kernel._omni_enable_extension("omni.usd")
+    # kernel._omni_import_module("omni.usd")
+    # # TODO
+    # import asyncio
+    # asyncio.ensure_future(kernel._omni.usd.get_context().attach_stage_async(stage))
 
     return stage
 
@@ -130,15 +132,15 @@ def usd_add_reference(
     kernel: Kernel | None = None,
 ) -> list["pxr.Usd.Prim"]:
     if kernel is None:
-        kernel = get_default_kernel()
+        kernel = get_running_kernel()
 
-    pxr = kernel.pxr
-    omni = kernel.omni
+    pxr = kernel._pxr
+    omni = kernel._omni
     # TODO
-    kernel.enable_extension("omni.usd")
-    kernel.enable_extension("omni.usd.metrics.assembler")
+    kernel._omni_enable_extension("omni.usd")
+    kernel._omni_enable_extension("omni.usd.metrics.assembler")
     # TODO NOTE this allows remote urls to work?
-    kernel.enable_extension("omni.usd_resolver")
+    kernel._omni_enable_extension("omni.usd_resolver")
 
     sdf_layer = pxr.Sdf.Layer.FindOrOpen(resource)
     if not sdf_layer:
@@ -197,12 +199,12 @@ def usd_import_urdf(
     resource_or_model: str,
     kernel: Kernel,
 ):
-    pxr = kernel.pxr
+    pxr = kernel._pxr
     # TODO
     # TODO NOTE BUG isaacsim.asset.importer.urdf prior to 2.4.27 has `.rotateMeshX` for `.dae` files which causes the links to be rotated!!!
     # https://github.com/isaac-sim/IsaacSim/commit/e680e71274626b275d5dbe755f04ccdea7bbe97c#diff-8f3f54a270af13942c9904d254c27992c5eed50f6addf95ce31060ea97c1c0ffL267
-    kernel.enable_extension("isaacsim.asset.importer.urdf")
-    isaacsim = kernel.import_module("isaacsim.asset.importer.urdf")
+    kernel._omni_enable_extension("isaacsim.asset.importer.urdf")
+    isaacsim = kernel._omni_import_module("isaacsim.asset.importer.urdf")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         usd_path = os.path.join(tmpdir, "todo.usd")
@@ -251,7 +253,7 @@ from typing import Any, Callable, Protocol
 import numpy
 from robotodo.utils.pose import Pose
 from robotodo.engines.core.path import PathExpression
-from robotodo.engines.isaac._kernel import Kernel
+from robotodo.engines.isaac.kernel import Kernel
 
 
 class USDPrimRef(Protocol):
@@ -329,7 +331,7 @@ class USDXformView:
     # TODO invalidate!!!!
     @functools.lru_cache
     def _xform_cache(self, stage: "pxr.Usd.Stage"):
-        pxr = self._kernel.pxr
+        pxr = self._kernel._pxr
 
         # TODO Usd.TimeCode.Default()
         cache = pxr.UsdGeom.XformCache()
@@ -363,7 +365,7 @@ class USDXformView:
     @property
     def pose(self):
         # TODO 
-        pxr = self._kernel.pxr
+        pxr = self._kernel._pxr
 
         return Pose.from_matrix(
             numpy.stack([
@@ -387,7 +389,7 @@ class USDXformView:
     @pose.setter
     def pose(self, value: Pose):
         # TODO 
-        pxr = self._kernel.pxr
+        pxr = self._kernel._pxr
 
         pose_parent = Pose.from_matrix(
             numpy.stack([
@@ -406,7 +408,7 @@ class USDXformView:
     
     @property
     def pose_in_parent(self):
-        pxr = self._kernel.pxr
+        pxr = self._kernel._pxr
         def get_local_transform(prim: "pxr.Usd.Prim"):
             xformable = pxr.UsdGeom.Xformable(prim)
             transform = xformable.GetLocalTransformation(pxr.Usd.TimeCode.Default())
@@ -426,11 +428,11 @@ class USDXformView:
     
     @pose_in_parent.setter
     def pose_in_parent(self, value: Pose):
-        pxr = self._kernel.pxr
-        omni = self._kernel.omni
+        pxr = self._kernel._pxr
+        omni = self._kernel._omni
         # TODO
-        self._kernel.enable_extension("omni.physx")
-        self._kernel.import_module("omni.physx.scripts.physicsUtils")
+        self._kernel._omni_enable_extension("omni.physx")
+        self._kernel._omni_import_module("omni.physx.scripts.physicsUtils")
         
         # TODO mv
         # value = Pose.from_matrix(
@@ -471,7 +473,7 @@ def usd_compute_geometry(
     kernel: Kernel,
 ) -> list[ProtoGeometry | PolygonMesh | None]:
     # TODO
-    pxr = kernel.pxr
+    pxr = kernel._pxr
 
     # TODO
     geometries = []
@@ -541,7 +543,7 @@ def usd_get_stage_id(stage: "pxr.Usd.Stage", kernel: Kernel) -> int:
     """
 
     # TODO
-    pxr = kernel.pxr
+    pxr = kernel._pxr
 
     stage_cache = pxr.UsdUtils.StageCache.Get()
     stage_id = stage_cache.GetId(stage).ToLongInt()
@@ -563,9 +565,9 @@ def usd_physx_query_articulation_properties(
     TODO doc
     """
 
-    omni = kernel.omni
-    kernel.enable_extension("omni.physx")
-    pxr = kernel.pxr
+    omni = kernel._omni
+    kernel._omni_enable_extension("omni.physx")
+    pxr = kernel._pxr
     
     result = []
 
@@ -597,10 +599,10 @@ def usd_physics_make_rigid(
     kernel: Kernel,
     deep: bool = True,
 ):
-    omni = kernel.omni
-    pxr = kernel.pxr
-    kernel.enable_extension("omni.physx")
-    kernel.import_module("omni.physx.scripts.deformableUtils")
+    omni = kernel._omni
+    pxr = kernel._pxr
+    kernel._omni_enable_extension("omni.physx")
+    kernel._omni_import_module("omni.physx.scripts.deformableUtils")
 
     if deep:
         prims = [
@@ -628,7 +630,29 @@ def usd_physics_make_rigid(
 
 
 # TODO
-from robotodo.engines.isaac._kernel import enable_physx_deformable_beta
+# TODO
+def enable_physx_deformable_beta(kernel: Kernel):
+    """
+    TODO doc
+
+    :param kernel: ...
+    """
+
+    import warnings
+
+    omni = kernel._omni
+    kernel._omni_enable_extension("omni.physx")
+
+    settings = kernel._carb.settings.get_settings()
+    SETTING_ENABLE_DEFORMABLE_BETA = omni.physx.bindings._physx.SETTING_ENABLE_DEFORMABLE_BETA
+
+    if not settings.get(SETTING_ENABLE_DEFORMABLE_BETA):
+        settings.set(SETTING_ENABLE_DEFORMABLE_BETA, True)
+        warnings.warn(
+            f"Deformable Schema Beta was requested to be enabled in Omniverse. "
+            f"It has now been enabled (Restart may be required for the changes to take effect). "
+            f"For details see https://docs.omniverse.nvidia.com/kit/docs/omni_physics/107.3/dev_guide/deformables_beta/deformable_authoring.html#enable-deformable-schema-beta"
+        )
 
 
 # TODO
@@ -640,11 +664,11 @@ def usd_physics_make_surface_deformable(
     kernel: Kernel,
     deep: bool = True,
 ):
-    omni = kernel.omni
-    pxr = kernel.pxr
+    omni = kernel._omni
+    pxr = kernel._pxr
 
-    kernel.enable_extension("omni.physx")
-    kernel.import_module("omni.physx.scripts.deformableUtils")
+    kernel._omni_enable_extension("omni.physx")
+    kernel._omni_import_module("omni.physx.scripts.deformableUtils")
     enable_physx_deformable_beta(kernel)
     
     if deep:
@@ -689,3 +713,25 @@ def usd_physics_make_surface_deformable(
             return prim
         
         warnings.warn(f"Non-mesh USD prim cannot be surface deformable: {prim}")
+
+
+# TODO
+_USD_PHYSICSSCENE_PATH_DEFAULT = "/PhysicsScene"
+def usd_physics_ensure_physics_scene(stage: "pxr.Usd.Stage", kernel: Kernel):
+    pxr = kernel._pxr
+    omni = kernel._omni
+    kernel._omni_enable_extension("omni.usd")
+
+    has_physics_scene = False
+    for prim in stage.Traverse():
+        if prim.IsA(pxr.UsdPhysics.Scene):
+            has_physics_scene = True
+            break
+
+    if not has_physics_scene:
+        path = omni.usd.get_stage_next_free_path(
+            stage, 
+            path=_USD_PHYSICSSCENE_PATH_DEFAULT,
+            prepend_default_prim=False,
+        )
+        pxr.UsdPhysics.Scene.Define(stage, path)

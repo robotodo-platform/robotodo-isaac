@@ -487,16 +487,22 @@ class MotionPlanner:
         # observation.get("target_pose")
         # observation.get("target_pose_candidates")
 
-        dof_positions, batch_shapes = einops.pack([dof_positions], "* dof")
+        # TODO broadcast
+        dof_positions, [batch_shape] = einops.pack([dof_positions], "* dof")
 
         # TODO
         target_pose_p, _ = einops.pack([target_pose.p], "* p")
         target_pose_q, _ = einops.pack([target_pose.q], "* q")
 
-        # TODO broadcast target_pose?? necesito??
-        # einops.broadcast
-        # einops.unpack(target_pose.p, batch_shapes, "* p")
-        # einops.unpack(target_pose.q, batch_shapes, "* q")
+        # TODO broadcast target_pose
+        target_pose_p = torch.broadcast_to(
+            torch.as_tensor(target_pose_p), 
+            size=(*batch_shape, 3),
+        )
+        target_pose_q = torch.broadcast_to(
+            torch.as_tensor(target_pose_q), 
+            size=(*batch_shape, 4),
+        )
 
         try:
             # TODO .plan_batch_env for batch collisions
@@ -542,7 +548,7 @@ class MotionPlanner:
         )
         [dof_positions_result] = einops.unpack(
             dof_positions_result,
-            batch_shapes, "* time dof",
+            [batch_shape], "* time dof",
         )
 
         dof_velocities_result = torch.asarray(plan_result.optimized_plan.velocity)
@@ -553,7 +559,7 @@ class MotionPlanner:
         # TODO
         [dof_velocities_result] = einops.unpack(
             dof_velocities_result,
-            batch_shapes, "* time dof",
+            [batch_shape], "* time dof",
         )
 
         action = {

@@ -1,3 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+
+"""
+Scene.
+"""
+
 
 import functools
 import contextlib
@@ -9,39 +15,18 @@ from robotodo.engines.core.path import PathExpression, PathExpressionLike
 from robotodo.engines.core.scene import ProtoScene
 # TODO
 from robotodo.utils.event import BaseSubscriptionPartialAsyncEventStream
-from robotodo.engines.isaac._kernel import Kernel, get_default_kernel
+from robotodo.engines.isaac.kernel import Kernel, get_running_kernel
 from robotodo.engines.isaac._utils.usd import (
     USDStageRef,
     is_usd_stage_ref,
     usd_get_stage_id, 
     usd_create_stage, 
     usd_load_stage,
+    usd_physics_ensure_physics_scene,
 )
 from robotodo.engines.isaac._utils.ui import (
     omni_enable_editing_experience,
 )
-
-
-# TODO
-# _USD_PHYSICSSCENE_PATH_DEFAULT = "/PhysicsScene"
-# def usd_ensure_physics_scene(stage: "pxr.Usd.Stage", kernel: Kernel):
-#     pxr = kernel.pxr
-#     omni = kernel.omni
-#     kernel.enable_extension("omni.usd")
-
-#     has_physics_scene = False
-#     for prim in stage.Traverse():
-#         if prim.IsA(pxr.UsdPhysics.Scene):
-#             has_physics_scene = True
-#             break
-
-#     if not has_physics_scene:
-#         path = omni.usd.get_stage_next_free_path(
-#             stage, 
-#             path=self._USD_PHYSICSSCENE_PATH_DEFAULT,
-#             prepend_default_prim=False,
-#         )
-#         pxr.UsdPhysics.Scene.Define(stage, path)
 
 
 # TODO !!!! per stage???
@@ -51,8 +36,8 @@ class PhysicsStepAsyncEventStream(BaseSubscriptionPartialAsyncEventStream[float]
 
     @functools.cached_property
     def _isaac_physx_interface(self):
-        self._scene._kernel.enable_extension("omni.physx")
-        return self._scene._kernel.omni.physx.get_physx_interface()
+        self._scene._kernel._omni_enable_extension("omni.physx")
+        return self._scene._kernel._omni.physx.get_physx_interface()
 
     # TODO
     @contextlib.contextmanager
@@ -67,34 +52,33 @@ class PhysicsStepAsyncEventStream(BaseSubscriptionPartialAsyncEventStream[float]
         sub.unsubscribe()
 
 
-# TODO multiple scenes are not supported!!!
-# TODO ? default scene: scene = Scene(); new scene: scene = engine.add(Scene())
+# TODO FIXME multiple scenes are not supported!!!
 class Scene(ProtoScene):
 
     @classmethod
-    def create(cls, _kernel: Kernel | None = None):
-        stage = usd_create_stage(kernel=_kernel)
-        return Scene(lambda: stage, _kernel=_kernel)
+    def create(cls, kernel: Kernel | None = None):
+        stage = usd_create_stage(kernel=kernel)
+        return Scene(lambda: stage, kernel=kernel)
     
     # TODO
     @classmethod
-    def load_usd(cls, source: str, _kernel: Kernel | None = None):
-        stage = usd_load_stage(source, kernel=_kernel)
-        return Scene(lambda: stage, _kernel=_kernel)
+    def load_usd(cls, source: str, kernel: Kernel | None = None):
+        stage = usd_load_stage(source, kernel=kernel)
+        return Scene(lambda: stage, kernel=kernel)
     
     # TODO
     @classmethod
-    def load(cls, source: str, _kernel: Kernel | None = None):
+    def load(cls, source: str, kernel: Kernel | None = None):
         # TODO !!!! check extension
-        return cls.load_usd(source=source, _kernel=_kernel)
+        return cls.load_usd(source=source, kernel=kernel)
 
     class _USDKernelDefaultStageRef(USDStageRef):
         def __init__(self, kernel: Kernel):
             self._kernel = kernel
 
         def __call__(self):
-            omni = self._kernel.omni
-            self._kernel.enable_extension("omni.usd")
+            omni = self._kernel._omni
+            self._kernel._omni_enable_extension("omni.usd")
 
             # TODO !!!
             stage = omni.usd.get_context().get_stage()
@@ -113,31 +97,26 @@ class Scene(ProtoScene):
     def __init__(
         self,
         ref: USDStageRef | None = None,
-        _kernel: Kernel | None = None
+        kernel: Kernel | None = None
     ):
         # TODO !!!!!
-        if _kernel is None:
-            _kernel = get_default_kernel()
+        if kernel is None:
+            kernel = get_running_kernel()
         match ref:
             case ref if is_usd_stage_ref(ref):
                 self._usd_stage_ref = ref
-                self._kernel = _kernel
+                self._kernel = kernel
             case None:
                 self._usd_stage_ref = Scene._USDKernelDefaultStageRef(
-                    kernel=_kernel,
+                    kernel=kernel,
                 )
-                self._kernel = _kernel
-                ...
+                self._kernel = kernel
             case _:
                 raise InvalidReferenceError(ref)
-
-    # TODO !!!!!
-    # def __init__(self, _usd_stage_ref: ... = None, _kernel: Kernel | None = None):
-    #     # TODO !!!!!
-    #     if _kernel is None:
-    #         _kernel = get_default_kernel()
-    #     self._kernel = _kernel
-    #     self._usd_stage_ref = _usd_stage_ref
+            
+    @property
+    def kernel(self):
+        return self._kernel
 
     def save(self, source: str | None = None):
         if source is None:
@@ -153,11 +132,21 @@ class Scene(ProtoScene):
     def _usd_stage(self):
         return self._usd_stage_ref()
     
+    def _isaac_ensure_current_stage(self):
+        omni = self._kernel._omni
+        stage = self._usd_stage_ref()
+        usd_context = omni.usd.get_context()
+        if usd_context.get_stage() != stage:
+            self._kernel._omni_run_coroutine(
+                usd_context.attach_stage_async(stage)
+            )
+    
     @property
     def _isaac_physx(self):
-        self._kernel.enable_extension("omni.physx")
+        self._isaac_ensure_current_stage()
+        self._kernel._omni_enable_extension("omni.physx")
 
-        physx = self._kernel.omni.physx.get_physx_interface()
+        physx = self._kernel._omni.physx.get_physx_interface()
         # TODO attach stage
 
         return physx
@@ -166,20 +155,21 @@ class Scene(ProtoScene):
     # TODO cache and ensure current stage !!!!
     @property
     def _isaac_physx_simulation(self):
-        self._kernel.enable_extension("omni.physx")
+        self._isaac_ensure_current_stage()
+        self._kernel._omni_enable_extension("omni.physx")
 
-        physx_sim = self._kernel.omni.physx.get_physx_simulation_interface()
-        # TODO util: usd_get_stage_id
+        physx_sim = self._kernel._omni.physx.get_physx_simulation_interface()
         # TODO FIXME: this causes timeline to stop working: 
         # see: https://forums.developer.nvidia.com/t/omniverse-physx-time-stepping-blocking/284664/10
-        if False:
-            current_stage_id = usd_get_stage_id(self._usd_stage, kernel=self._kernel).ToLongInt()
-            if physx_sim.get_attached_stage() != current_stage_id:
-                if not physx_sim.attach_stage(current_stage_id):
-                    raise RuntimeError(
-                        f"Failed to attach USD stage {self._usd_stage} "
-                        f"to the PhysX simulation interface {physx_sim}. Is it valid?"
-                    )
+        # TODO use usd context instead
+        # if False:
+        #     current_stage_id = usd_get_stage_id(self._usd_stage, kernel=self._kernel)
+        #     if physx_sim.get_attached_stage() != current_stage_id:
+        #         if not physx_sim.attach_stage(current_stage_id):
+        #             raise RuntimeError(
+        #                 f"Failed to attach USD stage {self._usd_stage} "
+        #                 f"to the PhysX simulation interface {physx_sim}. Is it valid?"
+        #             )
         return physx_sim
     
         # TODO check stage attachment
@@ -191,19 +181,21 @@ class Scene(ProtoScene):
 
     @functools.cached_property
     def _isaac_physics_tensor_view_cache(self):
-        omni = self._kernel.omni
+        omni = self._kernel._omni
 
         try:
-            self._kernel.enable_extension("omni.physics.tensors")
+            self._kernel._omni_enable_extension("omni.physics.tensors")
 
             stage = self._usd_stage
+            # TODO
+            usd_physics_ensure_physics_scene(stage, kernel=self._kernel)
+            self._isaac_ensure_current_stage()
             # TODO NOTE this also starts the simulation
             self._isaac_physx_simulation.flush_changes()
-            # TODO
             res = omni.physics.tensors.create_simulation_view(
                 "torch",
-                # TODO FIXME this breaks urdf importer bc of multiple stages in cache
-                # stage_id=usd_get_stage_id(stage, kernel=self._kernel).ToLongInt(),
+                # TODO
+                # stage_id=usd_get_stage_id(stage, kernel=self._kernel),
             )
         except Exception as error:
             # TODO
@@ -253,7 +245,7 @@ class Scene(ProtoScene):
 
         return (
             prim.GetPath().pathString
-            for prim in self._kernel.pxr.Usd.PrimRange(root_prim)
+            for prim in self._kernel._pxr.Usd.PrimRange(root_prim)
         )
 
     def resolve(self, path: PathExpressionLike):
@@ -261,9 +253,9 @@ class Scene(ProtoScene):
 
     # TODO stage !!!!
     def copy(self, path: PathExpressionLike, target_path: PathExpressionLike):
-        self._kernel.enable_extension("isaacsim.core.cloner")
-        self._kernel.import_module("isaacsim.core.cloner")
-        isaacsim = self._kernel.import_module("isaacsim")
+        self._kernel._omni_enable_extension("isaacsim.core.cloner")
+        self._kernel._omni_import_module("isaacsim.core.cloner")
+        isaacsim = self._kernel._omni_import_module("isaacsim")
 
         path = PathExpression(path)
         target_path = PathExpression(target_path)
@@ -284,10 +276,10 @@ class Scene(ProtoScene):
 
     # TODO
     def rename(self, path: PathExpressionLike, target_path: PathExpressionLike):
-        omni = self._kernel.omni
+        omni = self._kernel._omni
         # TODO
-        self._kernel.enable_extension("omni.usd")
-        self._kernel.enable_extension("omni.kit.commands")
+        self._kernel._omni_enable_extension("omni.usd")
+        self._kernel._omni_enable_extension("omni.kit.commands")
 
         paths = self.resolve(path)
         target_paths = self.resolve(target_path)
@@ -319,38 +311,56 @@ class Scene(ProtoScene):
     @functools.cached_property
     def _isaac_timeline(self):
         # TODO ensure current stage !!!!
-        omni = self._kernel.omni
-        self._kernel.enable_extension("omni.timeline")
-        self._kernel.import_module("omni.timeline")
-        return omni.timeline.acquire_timeline_interface()
+        self._isaac_ensure_current_stage()
+        omni = self._kernel._omni
+        self._kernel._omni_enable_extension("omni.timeline")
+        self._kernel._omni_import_module("omni.timeline")
+        return omni.timeline.acquire_timeline_interface().get_timeline()
 
+    # TODO deprecate in favor of `scene.step(num_timesteps="inf")`
     @property
     def autostepping(self):
         timeline = self._isaac_timeline
         return timeline.is_playing() and timeline.is_auto_updating()
     
+    # TODO deprecate 
     @autostepping.setter
     def autostepping(self, value):
         timeline = self._isaac_timeline
+        # TODO
+        # timeline.get_timeline_event_stream
         if value:
             timeline.set_auto_update(True)
             timeline.play()
+            timeline.commit()
+            # TODO ensure kernel stepping: better api??
+            self._kernel.run_forever()
         else:
             timeline.set_auto_update(False)
             timeline.pause()
+            timeline.commit()
 
     # TODO
     # TODO ref https://docs.omniverse.nvidia.com/kit/docs/omni_physics/108.0/dev_guide/simulation_control/simulation_control.html
     # TODO cannot reproduce: ~~this messes up the timeline for some reason !!!!!!!!~~
     # TODO api: support time??
-    async def step(self, timestep: float | None = None):
+    async def step(
+        self, 
+        # time: float | None = None,
+        timestep: float | None = None,
+        # num_timesteps: int = 1,
+    ):
         if timestep is None:
             timestep = 1 / 60
 
         if timestep != 0:
             # TODO
             physx_sim = self._isaac_physx_simulation
-            physx_sim.simulate(elapsed_time=float(timestep), current_time=0.)
+            physx_sim.simulate(
+                current_time=0.,
+                # current_time=float(time) if time is not None else 0.,
+                elapsed_time=float(timestep), 
+            )
             # NOTE this ensures the enqueued `.simulate` gets processed
             # and yes, this is non-async!
             physx_sim.fetch_results()
@@ -393,14 +403,46 @@ class SceneViewer:
     def __init__(self, scene: Scene):
         self._scene = scene
 
+    @property
+    def _omni_app_window(self):
+        kernel = self._scene._kernel
+        kernel._omni_enable_extension("omni.appwindow")
+        omni = kernel._omni
+
+        app_window_factory = omni.appwindow.acquire_app_window_factory_interface()
+        app_window = app_window_factory.get_app_window()
+        # TODO
+        assert app_window is not None
+        return app_window
+
+    def _omni_set_app_window_visible(self, visible: bool = True):
+        carb = self._scene._kernel._carb
+        self._scene._kernel._omni_enable_extension("carb.windowing.plugins")
+
+        carb_windowing_iface = carb.windowing.acquire_windowing_interface()
+        
+        carb_app_window = self._omni_app_window.get_window()
+        if carb_app_window is not None:
+            if visible:
+                carb_windowing_iface.show_window(carb_app_window)
+            else:
+                carb_windowing_iface.hide_window(carb_app_window)
+
     # TODO
     def show(self):
-        pass
+        self._scene._isaac_ensure_current_stage()
+        self._omni_set_app_window_visible(True)
+        # TODO
+        self._scene._kernel.run_forever()
+
+    # TODO
+    def hide(self):
+        self._omni_set_app_window_visible(False)
 
     # TODO
     @property
     def mode(self) -> Literal["viewing", "editing"] | None:
-        settings = self._scene._kernel.get_settings()
+        settings = self._scene._kernel._carb.settings.get_settings()
         match settings.get("/app/window/hideUi"):
             case True:
                 return "viewing"
@@ -409,7 +451,7 @@ class SceneViewer:
             
     @mode.setter
     def mode(self, value: ...):
-        settings = self._scene._kernel.get_settings()
+        settings = self._scene._kernel._carb.settings.get_settings()
         match value:
             case "viewing":
                 settings.set("/app/window/hideUi", True)
@@ -426,7 +468,7 @@ class SceneViewer:
     def selected_entity(self):
         from robotodo.engines.isaac.entity import Entity
 
-        omni = self._scene._kernel.omni
+        omni = self._scene._kernel._omni
         # TODO ensure stage
         selection = omni.usd.get_context().get_selection()
         return Entity(selection.get_selected_prim_paths(), scene=self._scene)
@@ -439,7 +481,7 @@ class SceneViewer:
         entity: Entity = value
 
         # TODO ensure stage
-        omni = self._scene._kernel.omni
+        omni = self._scene._kernel._omni
         selection = omni.usd.get_context().get_selection()
         selection.set_selected_prim_paths(entity.path)
 
@@ -448,9 +490,9 @@ class SceneViewer:
     def _isaac_debug_draw_interface(self):
         # TODO
         kernel = self._scene._kernel
-        kernel.enable_extension("isaacsim.util.debug_draw")
-        kernel.import_module("isaacsim.util.debug_draw")
-        isaacsim = kernel.import_module("isaacsim")
+        kernel._omni_enable_extension("isaacsim.util.debug_draw")
+        kernel._omni_import_module("isaacsim.util.debug_draw")
+        isaacsim = kernel._omni_import_module("isaacsim")
 
         return (
             isaacsim.util.debug_draw._debug_draw

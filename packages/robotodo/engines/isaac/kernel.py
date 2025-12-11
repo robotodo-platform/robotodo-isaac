@@ -1,0 +1,394 @@
+# SPDX-License-Identifier: Apache-2.0
+
+"""
+Kernel.
+"""
+
+
+import warnings
+import os
+import contextlib
+import asyncio
+import functools
+from typing import TypedDict, NotRequired, Unpack, Awaitable
+
+import nest_asyncio
+
+
+class KernelConfig(TypedDict):
+    _omni_config_path: NotRequired[str]
+    _omni_extra_argv: NotRequired[list[str]]
+
+
+class Kernel:
+    """
+    TODO doc
+    """
+
+    _config: KernelConfig
+
+    def __init__(self):
+        self._config = KernelConfig()
+
+    def configure(
+        self,
+        config: KernelConfig = KernelConfig(), 
+        **config_kwds: Unpack[KernelConfig],
+    ):
+        self._config = KernelConfig({
+            **self._config,
+            **config,
+            **config_kwds,
+        })
+        return self
+    
+    @property
+    def config(self):
+        return self._config
+
+    @functools.cached_property
+    def _app_cache(self):
+        """
+        TODO doc
+        """
+
+        @contextlib.contextmanager
+        def _omni_undo_monkeypatching():
+            """
+            Undo the unnecessary monkey-patching 
+            of builtin Python modules done by `omni.kit.app`.
+
+            .. seealso::
+                * :func:`_startup_kit_scripting` in 
+                `site-packages/omni/kernel/py/omni/kit/app/_impl/__init__.py`
+            """
+
+            import sys
+            import logging
+
+            meta_path_orig = list(sys.meta_path)
+            logging_handlers_orig = list(logging.root.handlers)
+            logging_level_orig = int(logging.root.level)
+
+            yield
+
+            sys.meta_path = [*meta_path_orig, *sys.meta_path]
+            logging.root.handlers = logging_handlers_orig
+            logging.root.level = logging_level_orig
+
+
+        # TODO NOTE HACK to suppress GUI window during startup
+        def _omni_suppress_appwindow():
+            import omni.kit.app
+
+            app = omni.kit.app.acquire_app_interface()
+            extension_manager = app.get_extension_manager()
+
+            # TODO
+            import carb.settings
+            settings = carb.settings.get_settings()
+            settings.set("/exts/omni.appwindow/autocreateAppWindow", False)
+
+            extension_manager.set_extension_enabled_immediate("carb.windowing.plugins", True)
+            extension_manager.set_extension_enabled_immediate("omni.appwindow", True)
+            # TODO NOTE this is the main culprit!!
+            extension_manager.set_extension_enabled_immediate("omni.kit.renderer.core", True)    
+
+            import carb.windowing
+            import omni.appwindow
+
+            carb_windowing_iface = carb.windowing.acquire_windowing_interface()
+            omni_app_window_factory = omni.appwindow.acquire_app_window_factory_interface()
+
+            app_window = omni_app_window_factory.get_app_window()
+            if app_window is None:
+                app_window = omni_app_window_factory.create_window_from_settings()
+                app_window.startup()
+                omni_app_window_factory.set_default_window(app_window)
+
+            carb_app_window = app_window.get_window()
+            if carb_app_window is not None:
+                carb_windowing_iface.hide_window(carb_app_window)
+
+            renderer = omni.kit.renderer.bind.acquire_renderer_interface()
+            renderer.startup()
+            # TODO NOTE this flashes the window (by 1 frame?)
+            renderer.attach_app_window(app_window)
+
+            # TODO necesito??
+            carb_app_window = app_window.get_window()
+            if carb_app_window is not None:
+                carb_windowing_iface.hide_window(carb_app_window)
+
+
+        nest_asyncio.apply()
+
+        with _omni_undo_monkeypatching():
+            # import isaacsim
+            # isaacsim.bootstrap_kernel()
+            # from isaacsim.simulation_app import AppFramework
+
+            import isaacsim.kit.kit_app
+
+            # import omni.kit_app
+            # omni.kit_app.bootstrap_kernel()
+
+            # TODO
+            # kit_app = omni.kit_app.KitApp()
+            kit_app = isaacsim.kit.kit_app.KitApp()
+
+            kit_path = self._config.get("_omni_config_path", None)
+            extra_argv = self._config.get("_omni_extra_argv", None)
+
+            argv = []
+            if kit_path is not None:
+                # argv.append(os.path.abspath(os.path.join(os.environ["EXP_PATH"], kit_path)))
+                argv.append(os.path.abspath(kit_path))
+            argv.extend([
+                # TODO necesito?
+                # extensions: so we can reference other kit files  
+                # "--ext-folder", os.path.abspath(os.path.join(os.environ["ISAAC_PATH"], "exts")),
+                # "--ext-folder", os.path.abspath(os.path.join(os.environ["ISAAC_PATH"], "apps")),
+                #
+                "--/app/name=robotodo.engines.isaac",
+                # 
+                "--allow-root",
+                "--/app/installSignalHandlers=false",
+                "--/app/python/interceptSysStdOutput=false",
+                "--/app/python/interceptSysExit=false",
+                "--/app/python/logSysStdOutput=false",
+                "--/app/python/enableGCProfiling=false",
+                "--/app/python/disableGCDuringStartup=false",
+                # NOTE required for GUI and MUST be enabled during startup (NOT later!!)
+                # "isaacsim.exp.*" extensions seem to rely on this for `.update` to work
+                "--enable", "omni.kit.loop-isaac",
+                # # NOTE required for functionality due to some unknown bugs.
+                # # Some must be enabled during startup
+                # "--enable", "omni.physics.physx",
+                # "--enable", "omni.physics.stageupdate",
+                # "--enable", "omni.physx.tensors",
+                # # "--enable", "omni.hydra.rtx",
+                # # "--enable", "omni.hydra.pxr",
+                # "--enable", "omni.replicator.core",
+                # "--enable", "omni.kit.manipulator.camera", # NOTE prevent error messages when missing
+                # # TODO HACK right now this just keeps the GUI layout working
+                # "--enable", "isaacsim.asset.importer.urdf",
+                # # TODO necesito?
+                # "--enable", "omni.usd.schema.metrics.assembler",
+                # optional ux improvement
+                "--portable", # run as portable to prevent writing extra files to user directory
+                "--/app/window/hideUi=true", # TODO
+                "--/app/enableStdoutOutput=false",
+                # logging
+                "--/log/file=",
+                "--/log/outputStreamLevel=Error",
+                "--/log/async=true",
+                # TODO NOTE ensure rendering syncd with .step
+                "--/app/asyncRendering=false",
+                # TODO NOTE make users reset manually??
+                # TODO https://docs.omniverse.nvidia.com/kit/docs/omni_physics/108.0/dev_guide/settings.html#_CPPv419kSettingResetOnStop
+                # "--/physics/resetOnStop=false",
+                "--/persistent/renderer/startupMessageDisplayed=true",
+                # TODO
+                "--/app/viewport/defaults/fillViewport=true",
+                # "--/persistent/app/viewport/pickOccluded=true",
+                "--/persistent/app/viewport/camMoveVelocity=0.05",
+                "--/persistent/app/viewport/gizmo/scale=0.01",
+                "--/persistent/app/viewport/grid/scale=1.0",
+                "--/persistent/app/primCreation/typedDefaults/camera/clippingRange=[0.01,10000000.0]",
+                # TODO
+                # "--/exts/omni.kit.async_engine/keep_loop_running=false",
+                # "--/exts/omni.kit.async_engine/spinLoopOncePerUpdate=true",
+            ])
+            if extra_argv is not None:
+                argv.extend(extra_argv)
+
+            kit_app.startup(argv)
+            # kit_app = AppFramework(argv=argv).app
+
+            # TODO unavailable until omni.appwindow 1.2.0
+            # TODO seealso https://docs.omniverse.nvidia.com/kit/docs/omni.appwindow/1.2.0/EVENTS.html
+            # import carb
+            # def todo(window: ...):
+            #     # TODO
+            #     print("TODO", window)
+            #     windowing = carb.windowing.acquire_windowing_interface()
+            #     windowing.hide_window(window)
+            # self._todo_subscription = carb.eventdispatcher.get_eventdispatcher().observe_event(
+            #     observer_name="TODO",
+            #     # event_name="omni.appwindow:window_created:immediate",
+            #     event_name="omni.appwindow:window_startup",
+            #     on_event=todo,
+            # )
+
+            # TODO
+            _omni_suppress_appwindow()
+
+            extension_manager = kit_app._app.get_extension_manager()
+            for extension_name in [
+                # NOTE required for functionality due to some unknown bugs.
+                # Some must be enabled during startup
+                "omni.physics.physx",
+                "omni.physics.stageupdate",
+                "omni.physx.tensors",
+                # "omni.hydra.rtx",
+                # "omni.hydra.pxr",
+                "omni.replicator.core",
+                "omni.kit.manipulator.camera", # NOTE prevent error messages when missing
+                # TODO HACK right now this just keeps the GUI layout working
+                "isaacsim.asset.importer.urdf",
+                # TODO necesito?
+                "omni.usd.schema.metrics.assembler",
+            ]:
+                extension_manager.set_extension_enabled(extension_name, True)
+
+        while not kit_app._app.is_app_ready():
+            kit_app._app.update()
+
+        # TODO
+        def should_invalidate():
+            return not kit_app._app.is_running()
+        # self._app = kit_app._app
+        return kit_app._app, should_invalidate
+
+    @property
+    def _app(self):
+        while True:
+            app, should_invalidate = self._app_cache
+            if should_invalidate():
+                del self._app_cache
+            else:
+                return app
+
+    async def stop(self):
+        self._app.shutdown()
+
+    def step(self):
+        self._app.update()
+
+    @functools.cached_property
+    def _run_forever_cache(self):
+        app = self._app
+        async def _impl():
+            # loop = asyncio.get_running_loop()
+            # TODO 
+            # while app.is_running():
+            while True:
+                await asyncio.sleep(0)
+                # TODO just app.update() ??
+                # loop.call_soon_threadsafe(app.update)
+                app.update()
+        # TODO check loop
+        if not asyncio.get_event_loop().is_running():
+            warnings.warn(
+                f"{self.run_forever} called without a running asyncio event loop. "
+                f"Updates are paused until an event loop is running"
+                # f"For more information, see TODO"
+            )
+        task = self._omni_run_coroutine(_impl(), run_until_complete=False)
+        # task = asyncio.create_task(_impl())
+        def should_invalidate():
+            return task.done()
+        return task, should_invalidate
+
+    # TODO
+    def run_forever(self):
+        while True:
+            task, should_invalidate = self._run_forever_cache
+            if should_invalidate():
+                del self._run_forever_cache
+            else:
+                return task
+            
+    # def run_forever(self):
+    #     app = self._app
+    #     loop = asyncio.get_running_loop()
+    #     future = asyncio.Future(loop=loop)
+
+    #     def f():
+    #         if future.done():
+    #             return
+    #         if not app.is_running():
+    #             return
+    #         try: app.update()
+    #         finally: 
+    #             loop.call_soon_threadsafe(f)
+        
+    #     loop.call_soon_threadsafe(f)
+    #     return future
+    
+    # 
+    @functools.cached_property
+    def _carb(self):
+        # TODO
+        self._app
+        return __import__("carb")
+
+    @functools.cached_property
+    def _omni(self):
+        # TODO !!!!
+        self._app
+        return __import__("omni")
+
+    @functools.cached_property
+    def _pxr(self):
+        # TODO !!!!
+        self._app
+        self._omni_enable_extension("omni.usd.libs")
+        return __import__("pxr")
+
+    def _omni_enable_extension(
+        self, 
+        name: str, 
+        enabled: bool = True,
+        immediate: bool = True,
+    ):
+        ext_manager = self._app.get_extension_manager()
+        if ext_manager.is_extension_enabled(name) is enabled:
+            return
+        if immediate:
+            ext_manager.set_extension_enabled_immediate(name, enabled)
+        else:
+            ext_manager.set_extension_enabled(name, enabled)
+
+    def _omni_enable_extensions(
+        self, 
+        names: list[str], 
+        enabled: bool = True,
+        immediate: bool = True,
+    ):
+        ext_manager = self._app.get_extension_manager()
+        for name in names:
+            ext_manager.set_extension_enabled(name, enabled)
+        if immediate:
+            ext_manager.process_and_apply_all_changes()
+
+    def _omni_import_module(self, module: str):
+        return __import__(module)
+    
+    # TODO seealso: https://github.com/isaac-sim/IsaacSim/blob/aa503a9bbf92405bbbcfe5361e1c4a74fe10d689/source/extensions/isaacsim.simulation_app/isaacsim/simulation_app/simulation_app.py#L717
+    def _omni_run_coroutine(
+        self,
+        coroutine: Awaitable,
+        run_until_complete: bool = True,
+    ) -> asyncio.Future:
+        omni = self._omni
+        self._omni_enable_extension("omni.kit.async_engine")
+        task_or_future = omni.kit.async_engine.run_coroutine(coroutine)
+        if run_until_complete:
+            while not task_or_future.done():
+                self._app.update()
+        return task_or_future
+    
+
+default_kernel = Kernel()
+"""
+TODO doc
+Default kernel.
+"""
+
+
+# TODO
+def get_running_kernel():
+    # default_kernel.run_forever()
+    return default_kernel

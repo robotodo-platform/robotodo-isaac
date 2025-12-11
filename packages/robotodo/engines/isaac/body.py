@@ -1,3 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+
+"""
+Body.
+"""
+
+
 import asyncio
 import contextlib
 import dataclasses
@@ -17,7 +24,7 @@ from robotodo.engines.core.path import PathExpression, PathExpressionLike, is_pa
 from robotodo.engines.isaac.scene import Scene
 from robotodo.engines.isaac.entity import Entity
 from robotodo.engines.isaac.material import Material
-from robotodo.engines.isaac._kernel import Kernel
+from robotodo.engines.isaac.kernel import Kernel
 from robotodo.engines.isaac._utils.usd import (
     USDPrimRef, 
     USDPrimPathExpressionRef, 
@@ -38,7 +45,7 @@ class Body(ProtoBody):
             self._kernel = kernel
 
         def __call__(self):
-            pxr = self._kernel.pxr
+            pxr = self._kernel._pxr
             return [
                 child_prim
                 for prim in self._ref()
@@ -68,7 +75,7 @@ class Body(ProtoBody):
         scene: Scene, 
         spec: BodySpec = BodySpec(),
     ):
-        pxr = scene._kernel.pxr
+        pxr = scene._kernel._pxr
 
         prims = []
 
@@ -297,7 +304,7 @@ class Body(ProtoBody):
     # TODO
     @functools.cached_property
     def material(self):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
 
         # TODO
         def _material_prims_ref():
@@ -326,7 +333,7 @@ class Body(ProtoBody):
     @property
     def geometry(self):
         kernel = self._scene._kernel
-        pxr = kernel.pxr
+        pxr = kernel._pxr
 
         res = []
         for prim in self._usd_prim_ref():
@@ -379,7 +386,7 @@ class Body(ProtoBody):
 
     @property
     def kind(self):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
 
         res = []
 
@@ -416,9 +423,14 @@ class Body(ProtoBody):
 
         return numpy.asarray(res)
     
+    # TODO
+    @kind.setter
+    def kind(self, value: ...):
+        raise NotImplementedError
+    
     @property
     def fixed(self):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
 
         res = []
 
@@ -451,7 +463,7 @@ class Body(ProtoBody):
     # TODO
     @fixed.setter
     def fixed(self, value):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
 
         prims = self._usd_prim_ref()
         value = numpy.broadcast_to(value, shape=len(prims))
@@ -745,10 +757,10 @@ class ContactAsyncEventStream(
     @contextlib.contextmanager
     def subscribe(self, callable):
         scene = self._body._scene
-        pxr = scene._kernel.pxr
+        pxr = scene._kernel._pxr
         
         # TODO
-        scene._kernel.enable_extension("omni.usd.schema.physx")
+        scene._kernel._omni_enable_extension("omni.usd.schema.physx")
 
         for prim in self._body._usd_prim_ref():
             if prim.HasAPI(pxr.PhysxSchema.PhysxContactReportAPI):
@@ -880,7 +892,7 @@ class Collision:
 
     @property
     def enabled(self):
-        pxr = self._body._scene._kernel.pxr
+        pxr = self._body._scene._kernel._pxr
 
         value = []
 
@@ -897,7 +909,7 @@ class Collision:
 
     @enabled.setter
     def enabled(self, value):
-        pxr = self._body._scene._kernel.pxr
+        pxr = self._body._scene._kernel._pxr
 
         prims = self._body._usd_prim_ref()
 

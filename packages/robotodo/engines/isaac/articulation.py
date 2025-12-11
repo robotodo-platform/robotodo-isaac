@@ -1,3 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+
+"""
+Articulation.
+"""
+
 
 import functools
 import warnings
@@ -26,7 +32,7 @@ from robotodo.engines.core.articulation import (
     ProtoSphericalJoint,
     ProtoArticulation,
 )
-from robotodo.engines.isaac._kernel import Kernel
+from robotodo.engines.isaac.kernel import Kernel
 from robotodo.engines.isaac.body import Body
 from robotodo.engines.isaac.entity import Entity
 from robotodo.engines.isaac.scene import Scene
@@ -145,7 +151,7 @@ class Joint(ProtoJoint):
     @property
     def kind(self):
         # TODO
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
         value = []
         for prim in self._usd_prim_ref():
             v = JointKind.UNKNOWN
@@ -167,7 +173,7 @@ class Joint(ProtoJoint):
     @property
     def body0(self):
         # TODO
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
 
         body_prim_paths = []
 
@@ -192,7 +198,7 @@ class Joint(ProtoJoint):
 
     @property
     def pose_in_body0(self):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
 
         positions = []
         rotations = []
@@ -212,7 +218,7 @@ class Joint(ProtoJoint):
     
     @property
     def body1(self):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
 
         body_prim_paths = []
 
@@ -237,7 +243,7 @@ class Joint(ProtoJoint):
 
     @property
     def pose_in_body1(self):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
 
         positions = []
         rotations = []
@@ -264,7 +270,7 @@ class FixedJoint(Joint, ProtoFixedJoint):
 class RevoluteJoint(Joint, ProtoRevoluteJoint):
     @property
     def axis(self):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
 
         value = []
         for prim in self._usd_prim_ref():
@@ -286,7 +292,7 @@ class RevoluteJoint(Joint, ProtoRevoluteJoint):
     
     @property
     def position_limit(self):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
 
         value = []
         for prim in self._usd_prim_ref():
@@ -306,7 +312,7 @@ class RevoluteJoint(Joint, ProtoRevoluteJoint):
 class PrismaticJoint(Joint, ProtoPrismaticJoint):
     @property
     def axis(self):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
 
         value = []
         for prim in self._usd_prim_ref():
@@ -328,7 +334,7 @@ class PrismaticJoint(Joint, ProtoPrismaticJoint):
     
     @property
     def position_limit(self):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
 
         value = []
         for prim in self._usd_prim_ref():
@@ -422,7 +428,7 @@ class Articulation(ProtoArticulation):
 
     @property
     def _usd_articulation_root_prims(self):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
 
         return [
             maybe_root_prim
@@ -573,7 +579,7 @@ class Articulation(ProtoArticulation):
 
     @property
     def joints(self):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
 
         joint_names = self._isaac_physics_articulation_view.shared_metatype.joint_names
         # NOTE shift by one since the world joint is not included
@@ -669,7 +675,7 @@ class Articulation(ProtoArticulation):
         value_ = torch.broadcast_to(torch.asarray(value), (view.count, view.max_dofs))
         view.set_dof_positions(value_, indices=torch.arange(view.count))
         # TODO FIXME: perf .change_block to defer result fetching?
-        self._scene._isaac_physics_tensor_ensure_sync()
+        # self._scene._isaac_physics_tensor_ensure_sync()
 
     @property
     def dof_position_limits(self):
@@ -688,7 +694,7 @@ class Articulation(ProtoArticulation):
         view = self._isaac_physics_articulation_view
         value_ = torch.broadcast_to(torch.asarray(value), (view.count, view.max_dofs))
         view.set_dof_velocities(value_, indices=torch.arange(view.count))
-        self._scene._isaac_physics_tensor_ensure_sync()
+        # self._scene._isaac_physics_tensor_ensure_sync()
 
     # TODO dof_velocity_limits
     # view.get_dof_max_velocities
@@ -700,25 +706,6 @@ class Articulation(ProtoArticulation):
     # @functools.lru_cache
     def planner(self, **planner_kwds: Unpack["ArticulationPlanner.Config"]):
         return ArticulationPlanner(self, **planner_kwds)
-
-    # # TODO deprecate ############
-    # # TODO necesito?
-    # @property
-    # def link_poses(self):
-    #     """
-    #     TODO doc
-
-    #     """
-
-    #     view = self._isaac_physics_articulation_view
-    #     link_transforms = view.get_link_transforms()
-
-    #     return Pose(
-    #         p=link_transforms[..., [0, 1, 2]],
-    #         q=link_transforms[..., [3, 4, 5, 6]],
-    #     )
-    # # TODO deprecate ############
-
 
 
 # TODO
@@ -831,6 +818,8 @@ class ArticulationDriver:
         # TODO
         position_error_limit: float = 1e-1,
         velocity_error_limit: float = 1e-1,
+        # TODO
+        # iteration_callback: ... = None,
     ):
         dof_indices = numpy.s_[:]
 
@@ -882,7 +871,7 @@ class ArticulationDriver:
                 )
 
                 # TODO
-                # print(position_err, velocity_err)
+                # iteration_callback(position_err, velocity_err)
 
                 if all([
                     numpy.allclose(position_err, 0., atol=position_error_limit),

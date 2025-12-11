@@ -1,3 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+
+"""
+Material.
+"""
+
+
 # TODO
 # https://docs.omniverse.nvidia.com/kit/docs/omni_physics/latest/dev_guide/deformables_beta/deformable_beta.html#create-and-assign-materials
 
@@ -80,7 +87,7 @@ class Material(ProtoMaterial):
 
     @property
     def static_friction(self):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
         # TODO FIXME perf
         res = []
         for material_prim in self._usd_prim_ref():
@@ -99,7 +106,7 @@ class Material(ProtoMaterial):
 
     @static_friction.setter
     def static_friction(self, value):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
         material_prims = self._usd_prim_ref()
         for material_prim, v in zip(
             material_prims,
@@ -117,7 +124,7 @@ class Material(ProtoMaterial):
 
     @property
     def dynamic_friction(self):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
         # TODO FIXME perf
         res = []
         for material_prim in self._usd_prim_ref():
@@ -136,7 +143,7 @@ class Material(ProtoMaterial):
 
     @dynamic_friction.setter
     def dynamic_friction(self, value):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
         material_prims = self._usd_prim_ref()
         for material_prim, v in zip(
             material_prims,
@@ -154,7 +161,7 @@ class Material(ProtoMaterial):
 
     @property
     def density(self):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
         # TODO FIXME perf
         res = []
         for material_prim in self._usd_prim_ref():
@@ -173,7 +180,7 @@ class Material(ProtoMaterial):
 
     @density.setter
     def density(self, value):
-        pxr = self._scene._kernel.pxr
+        pxr = self._scene._kernel._pxr
         material_prims = self._usd_prim_ref()
         for material_prim, v in zip(
             material_prims,

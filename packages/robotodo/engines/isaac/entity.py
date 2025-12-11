@@ -1,3 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+
+"""
+Entity.
+"""
+
 
 import numpy
 from tensorspecs import TensorLike
