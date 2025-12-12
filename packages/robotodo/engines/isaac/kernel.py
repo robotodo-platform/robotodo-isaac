@@ -196,6 +196,9 @@ class Kernel:
                 "--/persistent/app/viewport/gizmo/scale=0.01",
                 "--/persistent/app/viewport/grid/scale=1.0",
                 "--/persistent/app/primCreation/typedDefaults/camera/clippingRange=[0.01,10000000.0]",
+                "--/persistent/app/primCreation/typedDefaults/camera/focusDistance=10000000.0",
+                "--/persistent/app/primCreation/typedDefaults/orthoCamera/clippingRange=[0.01,10000000.0]",
+                "--/persistent/app/primCreation/typedDefaults/orthoCamera/focusDistance=10000000.0",
                 # TODO
                 # "--/exts/omni.kit.async_engine/keep_loop_running=false",
                 # "--/exts/omni.kit.async_engine/spinLoopOncePerUpdate=true",
@@ -274,10 +277,13 @@ class Kernel:
             # TODO 
             # while app.is_running():
             while True:
+                # TODO
+                # print("TODO")
                 await asyncio.sleep(0)
                 # TODO just app.update() ??
                 # loop.call_soon_threadsafe(app.update)
-                app.update()
+                try: app.update()
+                finally: continue
         # TODO check loop
         if not asyncio.get_event_loop().is_running():
             warnings.warn(

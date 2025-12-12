@@ -5,12 +5,14 @@ Sensor.
 """
 
 
+import sys
 import functools
 from typing import Any, Literal, NamedTuple
 
 # TODO
 import warp
 import torch
+import numpy
 import einops
 from robotodo.utils.pose import Pose
 from robotodo.engines.core.path import (
@@ -18,7 +20,7 @@ from robotodo.engines.core.path import (
     PathExpression, 
     is_path_expression_like,
 )
-from robotodo.engines.core.sensor import ProtoCamera
+from robotodo.engines.core.sensor import ProtoCamera, ProtoCameraImager, ProtoCameraOptics
 from robotodo.engines.isaac.scene import Scene
 from robotodo.engines.isaac.entity import Entity
 from robotodo.engines.isaac._utils.usd import (
@@ -26,6 +28,7 @@ from robotodo.engines.isaac._utils.usd import (
     is_usd_prim_ref,
     USDXformView,
     USDPrimPathExpressionRef,
+    usd_prims_get_meters_per_unit,
 )
 
 
@@ -39,6 +42,8 @@ class Camera(ProtoCamera):
     _usd_prims_ref: USDPrimRef
     _scene: Scene
 
+    _USD_CLIPPING_RANGE_DEFAULT = (1e-2, 1e+5)
+
     @classmethod
     def create(cls, ref, scene: Scene):
         pxr = scene._kernel._pxr
@@ -46,6 +51,12 @@ class Camera(ProtoCamera):
             pxr.UsdGeom.Camera.Define(scene._usd_stage, path).GetPrim()
             for path in PathExpression(ref).expand()
         ]
+        if cls._USD_CLIPPING_RANGE_DEFAULT is not None:
+            for prim in prims:
+                pxr.UsdGeom.Camera(prim).GetClippingRangeAttr().Set(
+                    cls._USD_CLIPPING_RANGE_DEFAULT
+                )
+        # TODO set clipping range to something more reasonable??
         return cls(lambda: prims, scene=scene)
 
     @classmethod
@@ -88,6 +99,10 @@ class Camera(ProtoCamera):
             case _:
                 raise ValueError("TODO")
             
+    @property
+    def viewer(self):
+        return CameraViewer(self)
+
     # TODO
     @functools.cached_property
     def _usd_xform_view(self):
@@ -169,7 +184,7 @@ class Camera(ProtoCamera):
     def _isaac_get_render_product(self, resolution: Resolution):
         self._scene._kernel._omni_enable_extension("omni.replicator.core")
         # TODO
-
+        self._scene._omni_ensure_current_stage()
         # # TODO Run a preview to ensure the replicator graph is initialized??
         # omni.replicator.core.orchestrator.preview()
         # TODO customizable!!!!!!!
@@ -265,6 +280,7 @@ class Camera(ProtoCamera):
 
             # TODO ensure kernel running?
             self._scene._kernel.run_forever()
+            self._scene._omni_ensure_current_stage()
             await omni.replicator.core.orchestrator.step_async(
                 # rt_subframes=1, 
                 delta_time=0, 
@@ -349,11 +365,160 @@ class Camera(ProtoCamera):
     async def read_depth(self, resolution: Resolution | tuple[int, int] = _RESOLUTION_DEFAULT):
         resolution = self.Resolution._make(resolution)
         return await self._isaac_get_frame(name="distance_to_image_plane", resolution=resolution)
+    
+    @property
+    def projection_matrix(self):
+        # TODO
+        raise NotImplementedError
+    
+    @functools.cached_property
+    def imager(self):
+        return CameraImager(self)
+
+    @functools.cached_property
+    def optics(self):
+        return CameraOptics(self)
+
+
+class CameraImager(ProtoCameraImager):
+    def __init__(self, camera: Camera):
+        self._camera = camera
 
     @property
-    def viewer(self):
-        return CameraViewer(self)
+    def size(self):
+        pxr = self._camera._scene._kernel._pxr
+        prims = self._camera._usd_prims_ref()
+        value = numpy.asarray(
+            [
+                [
+                    pxr.UsdGeom.Camera(prim)
+                    .GetVerticalApertureAttr().Get(),                    
+                    pxr.UsdGeom.Camera(prim)
+                    .GetHorizontalApertureAttr().Get(),
+                ]
+                for prim in prims
+            ],
+            dtype=numpy.float_,
+        )
+        value /= 10.
+        value *= usd_prims_get_meters_per_unit(
+            prims, 
+            kernel=self._camera._scene._kernel,
+        )
+        return value
     
+    @size.setter
+    def size(self, value):
+        pxr = self._camera._scene._kernel._pxr
+        prims = self._camera._usd_prims_ref()
+        value /= usd_prims_get_meters_per_unit(
+            prims, 
+            kernel=self._camera._scene._kernel,
+        )
+        value *= 10.
+        value = numpy.broadcast_to(value, (len(prims), 2))
+        for prim, [v_vaperture, v_haperture] in zip(prims, value):
+            api = pxr.UsdGeom.Camera(prim) 
+            api.GetVerticalApertureAttr().Set(float(v_vaperture))
+            api.GetHorizontalApertureAttr().Set(float(v_haperture))
+
+
+class CameraOptics(ProtoCameraOptics):
+    def __init__(self, camera: Camera):
+        self._camera = camera
+
+    @property
+    def focal_length(self):
+        pxr = self._camera._scene._kernel._pxr
+        prims = self._camera._usd_prims_ref()
+        value = numpy.asarray(
+            [
+                pxr.UsdGeom.Camera(prim)
+                .GetFocalLengthAttr().Get()
+                for prim in prims
+            ],
+            dtype=numpy.float_,
+        )
+        value /= 10.
+        value *= usd_prims_get_meters_per_unit(
+            prims, 
+            kernel=self._camera._scene._kernel,
+        )
+        return value
+    
+    @focal_length.setter
+    def focal_length(self, value):
+        pxr = self._camera._scene._kernel._pxr
+        prims = self._camera._usd_prims_ref()
+        value /= usd_prims_get_meters_per_unit(
+            prims, 
+            kernel=self._camera._scene._kernel,
+        )
+        value *= 10.
+        value = numpy.broadcast_to(value, len(prims))
+        for prim, v in zip(prims, value):
+            pxr.UsdGeom.Camera(prim).GetFocalLengthAttr().Set(float(v))
+        
+    @property
+    def focus_distance(self):
+        pxr = self._camera._scene._kernel._pxr
+        prims = self._camera._usd_prims_ref()
+        value = numpy.asarray(
+            [
+                pxr.UsdGeom.Camera(prim)
+                .GetFocusDistanceAttr().Get()
+                for prim in prims
+            ],
+            dtype=numpy.float_,
+        )
+        value *= usd_prims_get_meters_per_unit(
+            prims, 
+            kernel=self._camera._scene._kernel,
+        )
+        return value
+    
+    @focus_distance.setter
+    def focus_distance(self, value):
+        pxr = self._camera._scene._kernel._pxr
+        prims = self._camera._usd_prims_ref()
+        value /= usd_prims_get_meters_per_unit(
+            prims, 
+            kernel=self._camera._scene._kernel,
+        )
+        value = numpy.broadcast_to(value, len(prims))
+        for prim, v in zip(prims, value):
+            pxr.UsdGeom.Camera(prim).GetFocusDistanceAttr().Set(float(v))
+
+    @property
+    def f_stop(self):
+        pxr = self._camera._scene._kernel._pxr
+        prims = self._camera._usd_prims_ref()
+        value = numpy.asarray(
+            [
+                pxr.UsdGeom.Camera(prim)
+                .GetFStopAttr().Get()
+                for prim in prims
+            ],
+            dtype=numpy.float_,
+        )
+        value *= usd_prims_get_meters_per_unit(
+            prims, 
+            kernel=self._camera._scene._kernel,
+        )
+        return value
+    
+    @f_stop.setter
+    def f_stop(self, value):
+        pxr = self._camera._scene._kernel._pxr
+        prims = self._camera._usd_prims_ref()
+        value /= usd_prims_get_meters_per_unit(
+            prims, 
+            kernel=self._camera._scene._kernel,
+        )
+        value = numpy.broadcast_to(value, len(prims))
+        for prim, v in zip(prims, value):
+            pxr.UsdGeom.Camera(prim).GetFStopAttr().Set(float(v))
+
 
 class CameraViewer:
     def __init__(self, camera: Camera):

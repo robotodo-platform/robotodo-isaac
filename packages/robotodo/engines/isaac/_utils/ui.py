@@ -3,6 +3,54 @@ import asyncio
 from robotodo.engines.isaac.kernel import Kernel
 
 
+def omni_enable_viewing_experience(kernel: Kernel):
+
+    extension_names = [
+        #
+        "omni.kit.viewport.window",
+    ]
+
+    workspace_layout = [
+        {
+            "dock_id": 3358485147,
+            "children": [{
+                "dock_id": 3358485147,
+                "dock_tab_bar_enabled": True,
+                "dock_tab_bar_visible": True,
+                "height": 772.0,
+                # "position_x": 43.333335876464844,
+                # "position_y": 22.666667938232422,
+                # "selected_in_dock": True,
+                "title": "Viewport",
+                "visible": True,
+                "width": 1823.3333740234375,
+            }]
+        }
+    ]
+
+    omni = kernel._omni
+    kernel._omni_enable_extension("omni.ui")
+    kernel._omni_import_module("omni.ui")
+
+    async def _restore_workspace_task():
+        # await _ensure_window_titles(
+        #     window_titles,
+        #     kernel=kernel,
+        # )
+        # # TODO
+        # print("TODO", window_titles)
+        kernel._omni_enable_extensions(extension_names)
+        # TODO
+        await kernel._app.next_update_async()
+        omni.ui.Workspace.restore_workspace(
+            workspace_dump=workspace_layout,
+            keep_windows_open=False,
+        )
+
+    kernel._omni_run_coroutine(_restore_workspace_task(), run_until_complete=False)
+
+
+
 def omni_enable_editing_experience(kernel: Kernel):
 
     # TODO rm?

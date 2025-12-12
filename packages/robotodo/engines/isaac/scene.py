@@ -26,6 +26,7 @@ from robotodo.engines.isaac._utils.usd import (
 )
 from robotodo.engines.isaac._utils.ui import (
     omni_enable_editing_experience,
+    omni_enable_viewing_experience,
 )
 
 
@@ -132,7 +133,7 @@ class Scene(ProtoScene):
     def _usd_stage(self):
         return self._usd_stage_ref()
     
-    def _isaac_ensure_current_stage(self):
+    def _omni_ensure_current_stage(self):
         omni = self._kernel._omni
         stage = self._usd_stage_ref()
         usd_context = omni.usd.get_context()
@@ -142,8 +143,8 @@ class Scene(ProtoScene):
             )
     
     @property
-    def _isaac_physx(self):
-        self._isaac_ensure_current_stage()
+    def _omni_physx(self):
+        self._omni_ensure_current_stage()
         self._kernel._omni_enable_extension("omni.physx")
 
         physx = self._kernel._omni.physx.get_physx_interface()
@@ -154,8 +155,8 @@ class Scene(ProtoScene):
     # TODO FIXME perf
     # TODO cache and ensure current stage !!!!
     @property
-    def _isaac_physx_simulation(self):
-        self._isaac_ensure_current_stage()
+    def _omni_physx_simulation(self):
+        self._omni_ensure_current_stage()
         self._kernel._omni_enable_extension("omni.physx")
 
         physx_sim = self._kernel._omni.physx.get_physx_simulation_interface()
@@ -180,7 +181,7 @@ class Scene(ProtoScene):
         # stage_cache.Find(stage_cache.Id.FromLongInt(9223003))
 
     @functools.cached_property
-    def _isaac_physics_tensor_view_cache(self):
+    def _omni_physics_tensor_view_cache(self):
         omni = self._kernel._omni
 
         try:
@@ -189,9 +190,9 @@ class Scene(ProtoScene):
             stage = self._usd_stage
             # TODO
             usd_physics_ensure_physics_scene(stage, kernel=self._kernel)
-            self._isaac_ensure_current_stage()
+            self._omni_ensure_current_stage()
             # TODO NOTE this also starts the simulation
-            self._isaac_physx_simulation.flush_changes()
+            self._omni_physx_simulation.flush_changes()
             res = omni.physics.tensors.create_simulation_view(
                 "torch",
                 # TODO
@@ -210,18 +211,18 @@ class Scene(ProtoScene):
         return res
 
     @property
-    def _isaac_physics_tensor_view(self):
-        if not self._isaac_physics_tensor_view_cache.is_valid:
-            del self._isaac_physics_tensor_view_cache
-        return self._isaac_physics_tensor_view_cache
+    def _omni_physics_tensor_view(self):
+        if not self._omni_physics_tensor_view_cache.is_valid:
+            del self._omni_physics_tensor_view_cache
+        return self._omni_physics_tensor_view_cache
     
     # TODO see https://github.com/isaac-sim/IsaacSim/issues/223
-    def _isaac_physics_tensor_ensure_sync(self):
-        if not self._isaac_physx.is_running():
-            self._isaac_physx.start_simulation()
+    def _omni_physics_tensor_ensure_sync(self):
+        if not self._omni_physx.is_running():
+            self._omni_physx.start_simulation()
             # TODO call at least once: physx.update_simulation with non-zero dt
 
-        self._isaac_physx.update_transformations(
+        self._omni_physx.update_transformations(
             updateToFastCache=True,
             updateToUsd=True,
             updateVelocitiesToUsd=True,
@@ -309,9 +310,9 @@ class Scene(ProtoScene):
         #         raise RuntimeError("TODO")
 
     @functools.cached_property
-    def _isaac_timeline(self):
+    def _omni_timeline(self):
         # TODO ensure current stage !!!!
-        self._isaac_ensure_current_stage()
+        self._omni_ensure_current_stage()
         omni = self._kernel._omni
         self._kernel._omni_enable_extension("omni.timeline")
         self._kernel._omni_import_module("omni.timeline")
@@ -320,13 +321,13 @@ class Scene(ProtoScene):
     # TODO deprecate in favor of `scene.step(num_timesteps="inf")`
     @property
     def autostepping(self):
-        timeline = self._isaac_timeline
+        timeline = self._omni_timeline
         return timeline.is_playing() and timeline.is_auto_updating()
     
     # TODO deprecate 
     @autostepping.setter
     def autostepping(self, value):
-        timeline = self._isaac_timeline
+        timeline = self._omni_timeline
         # TODO
         # timeline.get_timeline_event_stream
         if value:
@@ -342,23 +343,20 @@ class Scene(ProtoScene):
 
     # TODO
     # TODO ref https://docs.omniverse.nvidia.com/kit/docs/omni_physics/108.0/dev_guide/simulation_control/simulation_control.html
-    # TODO cannot reproduce: ~~this messes up the timeline for some reason !!!!!!!!~~
-    # TODO api: support time??
     async def step(
         self, 
-        # time: float | None = None,
-        timestep: float | None = None,
+        time: float | None = None,
         # num_timesteps: int = 1,
+        timestep: float | None = None,
     ):
         if timestep is None:
             timestep = 1 / 60
 
         if timestep != 0:
             # TODO
-            physx_sim = self._isaac_physx_simulation
+            physx_sim = self._omni_physx_simulation
             physx_sim.simulate(
-                current_time=0.,
-                # current_time=float(time) if time is not None else 0.,
+                current_time=float(time) if time is not None else 0.,
                 elapsed_time=float(timestep), 
             )
             # NOTE this ensures the enqueued `.simulate` gets processed
@@ -384,12 +382,12 @@ class Scene(ProtoScene):
     @property
     def gravity(self):
         # TODO tensor backend
-        return numpy.asarray(self._isaac_physics_tensor_view.get_gravity())
+        return numpy.asarray(self._omni_physics_tensor_view.get_gravity())
     
     @gravity.setter
     def gravity(self, value: ...):
         # TODO tensor backend
-        self._isaac_physics_tensor_view.set_gravity(numpy.broadcast_to(value, shape=3))
+        self._omni_physics_tensor_view.set_gravity(numpy.broadcast_to(value, shape=3))
 
 
 from typing import TypedDict, Unpack, Literal
@@ -429,11 +427,13 @@ class SceneViewer:
                 carb_windowing_iface.hide_window(carb_app_window)
 
     # TODO
-    def show(self):
-        self._scene._isaac_ensure_current_stage()
+    def show(self):       
+        # TODO better ways to synchronize
+        self.mode = self.mode
+        self._scene._omni_ensure_current_stage()
         self._omni_set_app_window_visible(True)
         # TODO
-        self._scene._kernel.run_forever()
+        self._scene._kernel.run_forever()        
 
     # TODO
     def hide(self):
@@ -448,6 +448,7 @@ class SceneViewer:
                 return "viewing"
             case False:
                 return "editing"
+        return None
             
     @mode.setter
     def mode(self, value: ...):
@@ -455,11 +456,12 @@ class SceneViewer:
         match value:
             case "viewing":
                 settings.set("/app/window/hideUi", True)
+                # TODO this causes issues with the isaacsim registry in content browser. why????
+                # omni_enable_viewing_experience(kernel=self._scene._kernel)
             case "editing":
                 # TODO
                 settings.set("/app/window/hideUi", False)
                 omni_enable_editing_experience(kernel=self._scene._kernel)
-                # TODO start editing extension
             case _:
                 raise ValueError(f"TODO")
 
@@ -470,6 +472,7 @@ class SceneViewer:
 
         omni = self._scene._kernel._omni
         # TODO ensure stage
+        self._scene._omni_ensure_current_stage()
         selection = omni.usd.get_context().get_selection()
         return Entity(selection.get_selected_prim_paths(), scene=self._scene)
     
@@ -482,6 +485,7 @@ class SceneViewer:
 
         # TODO ensure stage
         omni = self._scene._kernel._omni
+        self._scene._omni_ensure_current_stage()
         selection = omni.usd.get_context().get_selection()
         selection.set_selected_prim_paths(entity.path)
 
@@ -494,6 +498,7 @@ class SceneViewer:
         kernel._omni_import_module("isaacsim.util.debug_draw")
         isaacsim = kernel._omni_import_module("isaacsim")
 
+        self._scene._omni_ensure_current_stage()
         return (
             isaacsim.util.debug_draw._debug_draw
             .acquire_debug_draw_interface()

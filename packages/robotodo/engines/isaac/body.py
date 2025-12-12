@@ -384,6 +384,7 @@ class Body(ProtoBody):
 
         return res
 
+    # TODO deep?
     @property
     def kind(self):
         pxr = self._scene._kernel._pxr
@@ -426,7 +427,22 @@ class Body(ProtoBody):
     # TODO
     @kind.setter
     def kind(self, value: ...):
-        raise NotImplementedError
+        prims = numpy.asarray(self._usd_prim_ref())
+        value = numpy.broadcast_to(value, shape=len(prims))
+
+        usd_physics_make_rigid(
+            prims[numpy.argwhere(value == BodyKind.RIGID.value)].flatten(), 
+            kernel=self._scene._kernel,
+            deep=False,
+        )
+
+        usd_physics_make_surface_deformable(
+            prims[numpy.argwhere(value == BodyKind.DEFORMABLE_SURFACE.value)].flatten(), 
+            kernel=self._scene._kernel,
+            deep=False,
+        )
+        
+        # TODO deformable volume
     
     @property
     def fixed(self):
@@ -555,23 +571,23 @@ class RigidBody(Body):
         )
 
     @functools.cached_property
-    def _isaac_physics_rigid_body_view_cache(self):
+    def _omni_physics_rigid_body_view_cache(self):
         try:
             paths = [
                 prim.GetPath().pathString
                 for prim in self._usd_prim_ref()
             ]
-            self._scene._isaac_physx_simulation.flush_changes()
-            isaac_physics_tensor_view = self._scene._isaac_physics_tensor_view
+            self._scene._omni_physx_simulation.flush_changes()
+            omni_physics_tensor_view = self._scene._omni_physics_tensor_view
             rigid_body_view = (
-                isaac_physics_tensor_view
+                omni_physics_tensor_view
                 .create_rigid_body_view(paths)
             )
             assert rigid_body_view is not None
             assert rigid_body_view.check()
             def should_invalidate():
                 return not (
-                    isaac_physics_tensor_view.is_valid
+                    omni_physics_tensor_view.is_valid
                     and rigid_body_view.check()
                 )
         except Exception as error:
@@ -582,29 +598,29 @@ class RigidBody(Body):
         return rigid_body_view, should_invalidate
     
     @property
-    def _isaac_physics_rigid_body_view(self):
+    def _omni_physics_rigid_body_view(self):
         while True:
-            rigid_body_view, should_invalidate = self._isaac_physics_rigid_body_view_cache
+            rigid_body_view, should_invalidate = self._omni_physics_rigid_body_view_cache
             if should_invalidate():
-                del self._isaac_physics_rigid_body_view_cache
+                del self._omni_physics_rigid_body_view_cache
             else:
                 return rigid_body_view
         
     # TODO is this relevant?? https://docs.omniverse.nvidia.com/kit/docs/omni_physics/108.1/dev_guide/rigid_bodies_articulations/rigid_bodies.html#automatic-computation-of-rigid-body-mass-distribution
     @property
     def mass(self):
-        return self._isaac_physics_rigid_body_view.get_masses()
+        return self._omni_physics_rigid_body_view.get_masses()
     
     # TODO BUG upstream: physics tensor api: changes not written to usd until .step
     @mass.setter
     def mass(self, value):
-        view = self._isaac_physics_rigid_body_view
+        view = self._omni_physics_rigid_body_view
         value_ = torch.broadcast_to(torch.asarray(value), (view.count, 1))
         view.set_masses(value_, indices=torch.arange(view.count))
 
     @property
     def mass_center_pose(self):
-        coms = self._isaac_physics_rigid_body_view.get_coms()
+        coms = self._omni_physics_rigid_body_view.get_coms()
         return Pose(
             p=coms[..., [0, 1, 2]],
             q=coms[..., [3, 4, 5, 6]],
@@ -613,7 +629,7 @@ class RigidBody(Body):
     # TODO BUG upstream: physics tensor api: changes not written to usd until .step
     @mass_center_pose.setter
     def mass_center_pose(self, value: Pose):
-        view = self._isaac_physics_rigid_body_view
+        view = self._omni_physics_rigid_body_view
         value_ = torch.broadcast_to(
             torch.concat((torch.asarray(value.p), torch.asarray(value.q))),
             size=(view.count, 7),
@@ -746,7 +762,7 @@ class ContactAsyncEventStream(
         self._body = body
 
     # TODO
-    # def _isaac_physx_contact_report_callback(
+    # def _omni_physx_contact_report_callback(
     #     self,
     #     contact_headers: list, 
     #     contact_datas: list, 
@@ -877,7 +893,7 @@ class ContactAsyncEventStream(
                     asyncio.create_task(result)
 
         sub = (
-            scene._isaac_physx_simulation
+            scene._omni_physx_simulation
             .subscribe_full_contact_report_events(
                 contact_report_callback
             )

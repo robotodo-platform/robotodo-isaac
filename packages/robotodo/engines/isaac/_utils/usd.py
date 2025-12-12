@@ -469,7 +469,7 @@ class USDXformView:
 # TODO
 # TODO scale: ...
 def usd_compute_geometry(
-    prims: list["pxr.Usd.Prim"], 
+    prims: Iterable["pxr.Usd.Prim"], 
     kernel: Kernel,
 ) -> list[ProtoGeometry | PolygonMesh | None]:
     # TODO
@@ -556,7 +556,7 @@ def usd_get_stage_id(stage: "pxr.Usd.Stage", kernel: Kernel) -> int:
 
 # TODO
 def usd_physx_query_articulation_properties(
-    prims: list["pxr.Usd.Prim"], 
+    prims: Iterable["pxr.Usd.Prim"], 
     kernel: Kernel,
 ):
     """
@@ -595,7 +595,7 @@ def usd_physx_query_articulation_properties(
 
 
 def usd_physics_make_rigid(
-    prims: list["pxr.Usd.Prim"], 
+    prims: Iterable["pxr.Usd.Prim"], 
     kernel: Kernel,
     deep: bool = True,
 ):
@@ -660,7 +660,7 @@ def enable_physx_deformable_beta(kernel: Kernel):
 
 
 def usd_physics_make_surface_deformable(
-    prims: list["pxr.Usd.Prim"], 
+    prims: Iterable["pxr.Usd.Prim"], 
     kernel: Kernel,
     deep: bool = True,
 ):
@@ -735,3 +735,42 @@ def usd_physics_ensure_physics_scene(stage: "pxr.Usd.Stage", kernel: Kernel):
             prepend_default_prim=False,
         )
         pxr.UsdPhysics.Scene.Define(stage, path)
+
+
+import numpy
+
+
+# TODO
+# def usd_prims_get_attributes(
+#     prims: list["pxr.Usd.Prim"], 
+#     name: str, 
+#     invalid_value: ...,
+#     # kernel: Kernel,
+# ):
+#     return numpy.asarray([
+#         prim.GetAttribute(name).Get()
+#         if prim.HasAttribute(name) else
+#         invalid_value
+#         for prim in prims
+#     ])
+# def usd_prims_set_attributes(
+#     prims: list["pxr.Usd.Prim"], 
+#     name: str, 
+#     values: ...,
+#     invalid_value: ...,
+#     # kernel: Kernel,
+# ):
+#     pass
+
+
+def usd_prims_get_meters_per_unit(
+    prims: Iterable["pxr.Usd.Prim"],
+    kernel: Kernel,
+):
+    pxr = kernel._pxr
+    return numpy.asarray([
+        pxr.UsdGeom.GetStageMetersPerUnit(prim.GetStage())
+        if prim else
+        numpy.nan
+        for prim in prims
+    ])

@@ -453,8 +453,8 @@ class Articulation(ProtoArticulation):
                 prim.GetPath().pathString
                 for prim in self._usd_articulation_root_prims
             ]
-            self._scene._isaac_physx_simulation.flush_changes()
-            isaac_physics_tensor_view = self._scene._isaac_physics_tensor_view
+            self._scene._omni_physx_simulation.flush_changes()
+            isaac_physics_tensor_view = self._scene._omni_physics_tensor_view
             articulation_view = (
                 isaac_physics_tensor_view
                 .create_articulation_view(resolved_root_paths)
