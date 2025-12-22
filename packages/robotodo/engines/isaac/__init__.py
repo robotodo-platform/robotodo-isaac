@@ -15,7 +15,7 @@ from robotodo.engines.isaac.body import (
 )
 from robotodo.engines.isaac.scene import Scene
 from robotodo.engines.isaac.sensor import (
-    Camera
+    Camera,
 )
 
 

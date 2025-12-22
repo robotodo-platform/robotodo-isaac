@@ -6,8 +6,17 @@ from robotodo.engines.isaac.kernel import Kernel
 def omni_enable_viewing_experience(kernel: Kernel):
 
     extension_names = [
-        #
+        # TODO
+        "omni.hydra.rtx",
+        "omni.hydra.pxr",
+        # docking
+        "omni.kit.mainwindow",
+        # #
         "omni.kit.viewport.window",
+        # # NOTE prevent error messages when missing; viewport manipulator can be disabled in settings
+        "omni.kit.manipulator.camera",
+        #
+        # "omni.app.viewport",
     ]
 
     workspace_layout = [
@@ -17,37 +26,53 @@ def omni_enable_viewing_experience(kernel: Kernel):
                 "dock_id": 3358485147,
                 "dock_tab_bar_enabled": True,
                 "dock_tab_bar_visible": True,
-                "height": 772.0,
+                # "height": 772.0,
                 # "position_x": 43.333335876464844,
                 # "position_y": 22.666667938232422,
                 # "selected_in_dock": True,
                 "title": "Viewport",
                 "visible": True,
-                "width": 1823.3333740234375,
+                # "width": 1823.3333740234375,
             }]
         }
     ]
 
     omni = kernel._omni
+    carb = kernel._carb
     kernel._omni_enable_extension("omni.ui")
     kernel._omni_import_module("omni.ui")
 
+    kernel._omni_enable_extensions(extension_names)
+
+    carb.settings.get_settings().set("/app/docks/disabled", False)
+    omni.ui.Workspace.restore_workspace(
+        workspace_dump=workspace_layout,
+        keep_windows_open=False,
+    )
+
+    return
+
+
     async def _restore_workspace_task():
+        carb.settings.get_settings().set("/app/docks/disabled", False)
         # await _ensure_window_titles(
         #     window_titles,
         #     kernel=kernel,
         # )
         # # TODO
         # print("TODO", window_titles)
-        kernel._omni_enable_extensions(extension_names)
         # TODO
-        await kernel._app.next_update_async()
+        # await kernel._app.next_update_async()
         omni.ui.Workspace.restore_workspace(
             workspace_dump=workspace_layout,
             keep_windows_open=False,
         )
 
-    kernel._omni_run_coroutine(_restore_workspace_task(), run_until_complete=False)
+    # TODO
+    kernel._omni_run_coroutine(_restore_workspace_task())
+    # return kernel._omni_ensure_future(
+    #     _restore_workspace_task()
+    # )
 
 
 
@@ -185,6 +210,9 @@ def omni_enable_editing_experience(kernel: Kernel):
     # ]
 
     extension_names = [
+        # TODO
+        "omni.hydra.rtx",
+        "omni.hydra.pxr",
         #
         # TODO
         "omni.app.dev",
@@ -199,9 +227,9 @@ def omni_enable_editing_experience(kernel: Kernel):
         "omni.kit.viewport.window",
         # TODO
         "omni.usdphysics.ui",
-        # TODO
-        "isaacsim.gui.content_browser",
         "omni.simready.explorer",
+        # TODO
+        # "isaacsim.gui.content_browser",
     ]
 
     workspace_layout = [
@@ -350,6 +378,7 @@ def omni_enable_editing_experience(kernel: Kernel):
     ]
 
     omni = kernel._omni
+    carb = kernel._carb
     kernel._omni_enable_extension("omni.ui")
     kernel._omni_import_module("omni.ui")
     kernel._omni_enable_extension("omni.kit.mainwindow")
@@ -372,20 +401,36 @@ def omni_enable_editing_experience(kernel: Kernel):
     #     "Property",
     # ])
 
+
+    kernel._omni_enable_extensions(extension_names)
+
+    # TODO
+    carb.settings.get_settings().set("/app/docks/disabled", False)
+    omni.ui.Workspace.restore_workspace(
+        workspace_dump=workspace_layout,
+        keep_windows_open=False,
+    )
+
+    return
+
+
     async def _restore_workspace_task():
+        carb.settings.get_settings().set("/app/docks/disabled", False)
         # await _ensure_window_titles(
         #     window_titles,
         #     kernel=kernel,
         # )
         # # TODO
         # print("TODO", window_titles)
-        kernel._omni_enable_extensions(extension_names)
         # TODO
-        await kernel._app.next_update_async()
+        # await kernel._app.next_update_async()
         omni.ui.Workspace.restore_workspace(
             workspace_dump=workspace_layout,
             keep_windows_open=False,
         )
 
-    kernel._omni_run_coroutine(_restore_workspace_task(), run_until_complete=False)
+    # TODO
+    # kernel._omni_run_coroutine(_restore_workspace_task())
+    return kernel._omni_ensure_future(_restore_workspace_task())
+    # asyncio.get_event_loop().create_task(_restore_workspace_task())
 

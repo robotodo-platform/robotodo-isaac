@@ -13,7 +13,7 @@ readme = "README.md"
 license = "Apache-2.0"
 dependencies = [
     # TODO
-    "robotodo-core @ git+https://github.com/robotodo-platform/robotodo-core.git@221acd1",
+    "robotodo-core @ git+https://github.com/robotodo-platform/robotodo-core.git@6c4d90c",
     # TODO 
     "torch",
     "numpy",
@@ -23,7 +23,6 @@ dependencies = [
     "nest_asyncio",
     # TODO rm??
     #"isaacsim[all,extscache]>=5.0.0,<6.0.0",
-    #"isaacsim-core>=5.0.0,<6.0.0",
     # TODO NOTE limited to numpy v1 due to omni?
     "numpy>=1.0.0,<2.0.0",
     # TODO NOTE omniverse-kit 107.3.3 required by some isaacsim exts is missing from PyPI
@@ -43,6 +42,8 @@ dependencies = [
 [project.optional-dependencies]
 test = [
     "pytest", 
+    "pytest-asyncio", 
+    "numpy",
 ]
 lint = [
     "ruff",
@@ -64,7 +65,9 @@ local_scheme = "no-local-version"
 [tool.pytest.ini_options]
 minversion = "6.0"
 testpaths = ["packages"]
+# addopts = "--import-mode=importlib --doctest-modules --capture=tee-sys"
 addopts = "--import-mode=importlib --doctest-modules"
+asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 80

@@ -4,6 +4,8 @@
 Entity.
 """
 
+import io
+from typing import IO
 
 import numpy
 from tensorspecs import TensorLike
@@ -27,7 +29,7 @@ class Entity(ProtoEntity):
     _scene: Scene
 
     @classmethod
-    def load_usd(cls, ref: PathExpressionLike, source: str, scene: Scene):
+    def load_usd(cls, ref: PathExpressionLike, source: str | IO, scene: Scene):
         expr = PathExpression(ref)
 
         prims = usd_add_reference(
@@ -40,7 +42,7 @@ class Entity(ProtoEntity):
         return cls(lambda: prims, scene=scene)
     
     @classmethod
-    def load(cls, ref: PathExpressionLike, source: str, scene: Scene):
+    def load(cls, ref: PathExpressionLike, source: str | IO, scene: Scene):
         # TODO
         return cls.load_usd(
             ref=ref,

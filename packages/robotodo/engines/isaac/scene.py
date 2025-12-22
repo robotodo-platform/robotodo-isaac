@@ -5,11 +5,15 @@ Scene.
 """
 
 
+import io
+import warnings
 import functools
 import contextlib
 import asyncio
+from typing import IO
 
 import numpy
+import torch
 from robotodo.engines.core.error import InvalidReferenceError
 from robotodo.engines.core.path import PathExpression, PathExpressionLike
 from robotodo.engines.core.scene import ProtoScene
@@ -63,13 +67,13 @@ class Scene(ProtoScene):
     
     # TODO
     @classmethod
-    def load_usd(cls, source: str, kernel: Kernel | None = None):
+    def load_usd(cls, source: str | IO, kernel: Kernel | None = None):
         stage = usd_load_stage(source, kernel=kernel)
         return Scene(lambda: stage, kernel=kernel)
     
     # TODO
     @classmethod
-    def load(cls, source: str, kernel: Kernel | None = None):
+    def load(cls, source: str | IO, kernel: Kernel | None = None):
         # TODO !!!! check extension
         return cls.load_usd(source=source, kernel=kernel)
 
@@ -83,11 +87,16 @@ class Scene(ProtoScene):
 
             # TODO !!!
             stage = omni.usd.get_context().get_stage()
-            # TODO rm
             if stage is None:
-                # TODO !!!!!  Stage opening or closing already in progress so async???
-                omni.usd.get_context().new_stage()
-                stage = omni.usd.get_context().get_stage()
+                raise ValueError(
+                    f"Default scene (USD stage) does not exist. "
+                    f"Create or load one using {Scene.create} or {Scene.load}"
+                )
+            # # TODO rm
+            # if stage is None:
+            #     # TODO !!!!!  Stage opening or closing already in progress so async???
+            #     omni.usd.get_context().new_stage()
+            #     stage = omni.usd.get_context().get_stage()
             # TODO check None
             assert stage is not None
             return stage
@@ -114,7 +123,11 @@ class Scene(ProtoScene):
                 self._kernel = kernel
             case _:
                 raise InvalidReferenceError(ref)
-            
+
+    @functools.cached_property
+    def viewer(self):
+        return SceneViewer(scene=self)            
+
     @property
     def kernel(self):
         return self._kernel
@@ -135,17 +148,26 @@ class Scene(ProtoScene):
     
     def _omni_ensure_current_stage(self):
         omni = self._kernel._omni
+        self._kernel._omni_enable_extension("omni.usd")
         stage = self._usd_stage_ref()
+
         usd_context = omni.usd.get_context()
         if usd_context.get_stage() != stage:
             self._kernel._omni_run_coroutine(
-                usd_context.attach_stage_async(stage)
-            )
+                usd_context.attach_stage_async(stage),
+            ).result()
+
+        return usd_context
+    
+    # TODO !!!!
+    @property
+    def _omni_usd_context(self):
+        return self._omni_ensure_current_stage()
     
     @property
     def _omni_physx(self):
         self._omni_ensure_current_stage()
-        self._kernel._omni_enable_extension("omni.physx")
+        self._kernel._omni_enable_extensions(["omni.physx"])
 
         physx = self._kernel._omni.physx.get_physx_interface()
         # TODO attach stage
@@ -157,7 +179,7 @@ class Scene(ProtoScene):
     @property
     def _omni_physx_simulation(self):
         self._omni_ensure_current_stage()
-        self._kernel._omni_enable_extension("omni.physx")
+        self._kernel._omni_enable_extensions(["omni.physx"])
 
         physx_sim = self._kernel._omni.physx.get_physx_simulation_interface()
         # TODO FIXME: this causes timeline to stop working: 
@@ -185,14 +207,17 @@ class Scene(ProtoScene):
         omni = self._kernel._omni
 
         try:
-            self._kernel._omni_enable_extension("omni.physics.tensors")
+            self._kernel._omni_enable_extensions([
+                "omni.physics.tensors",
+                "omni.physx.tensors",
+            ])
 
             stage = self._usd_stage
             # TODO
             usd_physics_ensure_physics_scene(stage, kernel=self._kernel)
-            self._omni_ensure_current_stage()
             # TODO NOTE this also starts the simulation
             self._omni_physx_simulation.flush_changes()
+            self._omni_ensure_current_stage()
             res = omni.physics.tensors.create_simulation_view(
                 "torch",
                 # TODO
@@ -318,15 +343,81 @@ class Scene(ProtoScene):
         self._kernel._omni_import_module("omni.timeline")
         return omni.timeline.acquire_timeline_interface().get_timeline()
 
-    # TODO deprecate in favor of `scene.step(num_timesteps="inf")`
+    class _PlayController:
+        def __init__(
+            self,
+            scene: "Scene",
+            enabled: bool,
+        ):
+            self._scene = scene
+            self._enabled = enabled
+            # TODO
+            self._future: asyncio.Future | None = None
+
+        async def _enable(self):
+            timeline = self._scene._omni_timeline
+            timeline.set_auto_update(True)
+            timeline.play()
+            timeline.commit()
+
+            if self._future is None or self._future.done():
+                self._future = self._scene._kernel._omni_ensure_future(
+                    asyncio.Event().wait()
+                )
+
+            # TODO ensure kernel stepping: better api??
+            # self._scene._kernel.run_forever()
+
+        async def _disable(self):
+            timeline = self._scene._omni_timeline
+            timeline.set_auto_update(False)
+            timeline.pause()
+            timeline.commit()
+
+            if self._future is not None:
+                self._future.cancel()
+
+        def __await__(self):
+            yield from (
+                self._enable().__await__()
+                if self._enabled else
+                self._disable().__await__()
+            )
+
+        async def __aenter__(self):
+            await (
+                self._enable()
+                if self._enabled else
+                self._disable()
+            )
+
+        async def __aexit__(self, *_):
+            await (
+                self._enable()
+                if not self._enabled else
+                self._disable()
+            )
+
+    def play(self, enabled: bool = True):
+        return self._PlayController(
+            scene=self,
+            enabled=enabled,
+        )
+
+    # TODO DEPRECATE in favor of `await scene.play()` ##################
     @property
     def autostepping(self):
+        # TODO
+        warnings.warn(DeprecationWarning("Deprecated. Use `await scene.play()` instead"))
+
         timeline = self._omni_timeline
         return timeline.is_playing() and timeline.is_auto_updating()
     
-    # TODO deprecate 
     @autostepping.setter
     def autostepping(self, value):
+        # TODO
+        warnings.warn(DeprecationWarning("Deprecated. Use `await scene.play()` instead"))
+
         timeline = self._omni_timeline
         # TODO
         # timeline.get_timeline_event_stream
@@ -340,14 +431,14 @@ class Scene(ProtoScene):
             timeline.set_auto_update(False)
             timeline.pause()
             timeline.commit()
+    # TODO DEPRECATE ###############################################
 
     # TODO
     # TODO ref https://docs.omniverse.nvidia.com/kit/docs/omni_physics/108.0/dev_guide/simulation_control/simulation_control.html
     async def step(
         self, 
-        time: float | None = None,
-        # num_timesteps: int = 1,
         timestep: float | None = None,
+        time: float | None = None,
     ):
         if timestep is None:
             timestep = 1 / 60
@@ -374,20 +465,27 @@ class Scene(ProtoScene):
     def on_step(self):
         return PhysicsStepAsyncEventStream(scene=self)
 
-    @functools.cached_property
-    def viewer(self):
-        return SceneViewer(scene=self)
-
     # TODO FIXME unit
     @property
     def gravity(self):
+        pxr = self._kernel._pxr
         # TODO tensor backend
-        return numpy.asarray(self._omni_physics_tensor_view.get_gravity())
+        return (
+            torch.asarray(self._omni_physics_tensor_view.get_gravity()) 
+            * pxr.UsdGeom.GetStageMetersPerUnit(self._usd_stage)
+        )
     
     @gravity.setter
     def gravity(self, value: ...):
+        pxr = self._kernel._pxr
         # TODO tensor backend
-        self._omni_physics_tensor_view.set_gravity(numpy.broadcast_to(value, shape=3))
+        self._omni_physics_tensor_view.set_gravity(
+            torch.asarray(
+                torch.broadcast_to(torch.asarray(value), size=(3, ))
+                / pxr.UsdGeom.GetStageMetersPerUnit(self._usd_stage)                
+            )
+            .numpy(force=True)
+        )
 
 
 from typing import TypedDict, Unpack, Literal
@@ -417,27 +515,77 @@ class SceneViewer:
         carb = self._scene._kernel._carb
         self._scene._kernel._omni_enable_extension("carb.windowing.plugins")
 
-        carb_windowing_iface = carb.windowing.acquire_windowing_interface()
+        try:
+            carb_windowing_iface = carb.windowing.acquire_windowing_interface()
+        except Exception as error:
+            warnings.warn(f"TODO: {error}")
+            carb_windowing_iface = None
         
-        carb_app_window = self._omni_app_window.get_window()
-        if carb_app_window is not None:
-            if visible:
-                carb_windowing_iface.show_window(carb_app_window)
-            else:
-                carb_windowing_iface.hide_window(carb_app_window)
+        if carb_windowing_iface is not None:
+            carb_app_window = self._omni_app_window.get_window()
+            if carb_app_window is not None:
+                if visible:
+                    carb_windowing_iface.show_window(carb_app_window)
+                else:
+                    carb_windowing_iface.hide_window(carb_app_window)
 
-    # TODO
-    def show(self):       
-        # TODO better ways to synchronize
-        self.mode = self.mode
-        self._scene._omni_ensure_current_stage()
-        self._omni_set_app_window_visible(True)
-        # TODO
-        self._scene._kernel.run_forever()        
+    class _ShowController:
+        def __init__(
+            self, 
+            viewer: "SceneViewer",
+            enabled: bool,
+        ):
+            self._viewer = viewer
+            self._enabled = enabled
+            self._future: asyncio.Future | None = None
 
-    # TODO
-    def hide(self):
-        self._omni_set_app_window_visible(False)
+        async def _enable(self):
+            # TODO better ways to synchronize
+            self._viewer.mode = self._viewer.mode
+            self._viewer._scene._omni_ensure_current_stage()
+            self._viewer._omni_set_app_window_visible(True)
+
+            if self._future is None or self._future.done():
+                self._future = self._viewer._scene._kernel._omni_ensure_future(
+                    asyncio.Event().wait()
+                )
+            # TODO
+            # self._viewer._scene._kernel.run_forever()
+
+        async def _disable(self):
+            # TODO
+            self._viewer._omni_set_app_window_visible(False)
+            # TODO destroy windows to save resource
+
+            if self._future is not None:
+                self._future.cancel()
+
+        def __await__(self):
+            yield from (
+                self._enable().__await__()
+                if self._enabled else
+                self._disable().__await__()
+            )
+
+        async def __aenter__(self):
+            await (
+                self._enable()
+                if self._enabled else
+                self._disable()
+            )
+
+        async def __aexit__(self, *_):
+            await (
+                self._enable()
+                if not self._enabled else
+                self._disable()
+            )
+
+    def show(self, enabled: bool = True):
+        return self._ShowController(
+            viewer=self,
+            enabled=enabled, 
+        )
 
     # TODO
     @property
@@ -454,14 +602,18 @@ class SceneViewer:
     def mode(self, value: ...):
         settings = self._scene._kernel._carb.settings.get_settings()
         match value:
-            case "viewing":
+            # TODO
+            case None | "viewing":
                 settings.set("/app/window/hideUi", True)
                 # TODO this causes issues with the isaacsim registry in content browser. why????
-                # omni_enable_viewing_experience(kernel=self._scene._kernel)
+                omni_enable_viewing_experience(kernel=self._scene._kernel)
             case "editing":
                 # TODO
                 settings.set("/app/window/hideUi", False)
                 omni_enable_editing_experience(kernel=self._scene._kernel)
+            case None:
+                # TODO disable everything
+                ...
             case _:
                 raise ValueError(f"TODO")
 

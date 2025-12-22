@@ -326,7 +326,6 @@ class Body(ProtoBody):
     def collision(self):
         return Collision(self)
     
-    # TODO FIXME: xform relative to this prim
     # TODO better repr format??>
     # TODO not all children are included???
     # TODO optimize: instanceable assets may have shared geoms

@@ -1,0 +1,17 @@
+#usda 1.0
+(
+    # 1 unit = 1 cm (NOT 1 meter)
+    metersPerUnit = 0.01
+    upAxis = "Z"
+)
+
+# Minimal physics-only stage (no geometry, no lights, no cameras)
+def PhysicsScene "PhysicsScene"
+{
+    # Gravity points down -Z
+    float3 physics:gravityDirection = (0, 0, -1)
+
+    # Gravity magnitude is in "stage units / s^2".
+    # Since metersPerUnit=0.01 (1 unit = 0.01 m), 9.81 m/s^2 => 9.81 / 0.01 = 981 units/s^2.
+    float physics:gravityMagnitude = 981.0
+}

@@ -14,9 +14,9 @@ async def main():
     # TODO load from source specified in cli
     scene = Scene.create()
     scene.viewer.mode = "editing"
-    scene.viewer.show()
+    await scene.viewer.show()
 
-    await scene.kernel.run_forever()
+    await asyncio.Future()
 
 
 if __name__ == "__main__":

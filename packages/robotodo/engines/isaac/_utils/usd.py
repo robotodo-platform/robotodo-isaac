@@ -1,7 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
 
+"""
+USD utilities.
+"""
+
+
+import io
 import contextlib
 import warnings
-from typing import Optional, TypedDict, Unpack
+from typing import Iterable, Optional, TypedDict, Unpack, IO
 
 import numpy
 from robotodo.engines.core.path import PathExpressionLike
@@ -79,8 +86,7 @@ def usd_create_stage(
 
 
 def usd_load_stage(
-    resource: str,
-    as_sublayer: bool = False,
+    resource: str | IO,
     kernel: Kernel | None = None,
 ) -> "pxr.Usd.Stage":
     if kernel is None:
@@ -93,41 +99,27 @@ def usd_load_stage(
     # TODO NOTE this allows remote urls to work?
     kernel._omni_enable_extension("omni.usd_resolver")
 
-    if as_sublayer:
-        stage = pxr.Usd.Stage.CreateInMemory()
-        # TODO customizable!!!  also necesito???
-        pxr.UsdGeom.SetStageUpAxis(stage, pxr.UsdGeom.Tokens.z)
-        stage.GetRootLayer().subLayerPaths.append(resource)
-    else:
-        stage = pxr.Usd.Stage.Open(resource)
-
-    # # TODO this attaches the stage to the viewer and inits rendering+physics?
-    # # TODO FIXME rm in the future when: 1) urdf stage= bug has been fixed 2) users are informed of the behavior
-    # kernel._omni_enable_extension("omni.usd")
-    # kernel._omni_import_module("omni.usd")
-    # # TODO
-    # import asyncio
-    # asyncio.ensure_future(kernel._omni.usd.get_context().attach_stage_async(stage))
+    match resource:
+        case str():
+            stage = pxr.Usd.Stage.Open(resource)
+        case io.IOBase():
+            text = resource.read()
+            if isinstance(text, bytes):
+                text = text.decode("utf-8")
+            layer = pxr.Sdf.Layer.CreateAnonymous(".usda")
+            if not layer.ImportFromString(text):
+                raise RuntimeError("TODO")
+            stage = pxr.Usd.Stage.Open(layer.identifier)
+        case _:
+            raise ValueError("TODO")
 
     return stage
-
-    # TODO alt impl: add stage directly but stage maybe readonly!!!!
-    # is_success, message = await ctx.open_stage_async(resource_or_model)
-    # if not is_success:
-    #     raise RuntimeError(f"Failed to load USD scene {resource_or_model}: {message}")
-    # stage = ctx.get_stage()
-    # # TODO check None
-    # return Scene(kernel=kernel, _usd_stage=stage)
-
-
-# TODO
-from typing import Iterable
 
 
 def usd_add_reference(
     stage: "pxr.Usd.Stage",
     paths: Iterable[str],
-    resource: str,
+    resource: str | IO,
     # TODO
     kernel: Kernel | None = None,
 ) -> list["pxr.Usd.Prim"]:
@@ -142,9 +134,21 @@ def usd_add_reference(
     # TODO NOTE this allows remote urls to work?
     kernel._omni_enable_extension("omni.usd_resolver")
 
-    sdf_layer = pxr.Sdf.Layer.FindOrOpen(resource)
-    if not sdf_layer:
-        raise RuntimeError(f"Could not get {pxr.Sdf.Layer} for {resource}")
+    match resource:
+        case str():
+            sdf_layer = pxr.Sdf.Layer.FindOrOpen(resource)
+            if not sdf_layer:
+                raise RuntimeError(f"Could not get {pxr.Sdf.Layer} for {resource}")
+        case io.IOBase():
+            text = resource.read()
+            if isinstance(text, bytes):
+                text = text.decode("utf-8")
+            layer = pxr.Sdf.Layer.CreateAnonymous(".usda")
+            if not layer.ImportFromString(text):
+                raise RuntimeError("TODO")
+            sdf_layer = layer
+        case _:
+            raise ValueError("TODO")
     
     stage_id = pxr.UsdUtils.StageCache.Get().GetId(stage).ToLongInt()
     ret_val = omni.metrics.assembler.core.get_metrics_assembler_interface().check_layers(
@@ -447,7 +451,7 @@ class USDXformView:
         # TODO
         # with pxr.Sdf.ChangeBlock():
         if True:
-            for prim, p_vec3, q_quat in zip(self.prims, p_vec3s, q_quats):
+            for prim, p_vec3, q_quat in zip(self.prims, p_vec3s, q_quats, strict=True):
                 xformable = pxr.UsdGeom.Xformable(prim)
                 omni.physx.scripts.physicsUtils \
                     .setup_transform_as_scale_orient_translate(xformable)
