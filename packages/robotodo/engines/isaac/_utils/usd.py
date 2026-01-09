@@ -16,6 +16,7 @@ from robotodo.utils.geometry import ProtoGeometry, Plane, Box, Sphere, PolygonMe
 from robotodo.engines.isaac.kernel import Kernel, get_running_kernel
 
 
+# TODO deprecate??
 def usd_ensure_free_path(
     stage: "pxr.Usd.Stage",
     path: str | None = None,
@@ -117,85 +118,32 @@ def usd_load_stage(
     return stage
 
 
-# TODO rm
-# def _todo_rm_usd_add_reference(
-#     stage: "pxr.Usd.Stage",
-#     paths: Iterable[str],
-#     resource: str | IO,
-#     # TODO
-#     kernel: Kernel | None = None,
-# ) -> list["pxr.Usd.Prim"]:
-#     if kernel is None:
-#         kernel = get_running_kernel()
+def usd_save_stage(
+    stage: "pxr.Usd.Stage",
+    resource: str | IO | None,
+    # TODO format
+    # format: Literal[".usda", Any] = ".usda",
+    kernel: Kernel | None = None,
+):
+    if kernel is None:
+        kernel = get_running_kernel()
 
-#     pxr = kernel._pxr
-#     omni = kernel._omni
-#     # TODO
-#     kernel._omni_enable_extension("omni.usd")
-#     kernel._omni_enable_extension("omni.usd.metrics.assembler")
-#     # TODO NOTE this allows remote urls to work?
-#     kernel._omni_enable_extension("omni.usd_resolver")
+    match resource:
+        case str():
+            # TODO
+            stage.Export(resource)
+        case io.IOBase():
+            raise NotImplementedError("TODO")
+        case None:
+            # TODO order?
+            stage.Save()
+            stage.SaveSessionLayers()
+        case _:
+            raise ValueError("TODO")
 
-#     match resource:
-#         case str():
-#             sdf_layer = pxr.Sdf.Layer.FindOrOpen(resource)
-#             if not sdf_layer:
-#                 raise RuntimeError(f"Could not get {pxr.Sdf.Layer} for {resource}")
-#         case io.IOBase():
-#             text = resource.read()
-#             if isinstance(text, bytes):
-#                 text = text.decode("utf-8")
-#             layer = pxr.Sdf.Layer.CreateAnonymous(".usda")
-#             if not layer.ImportFromString(text):
-#                 raise RuntimeError("TODO")
-#             sdf_layer = layer
-#         case _:
-#             raise ValueError("TODO")
-    
-#     stage_id = pxr.UsdUtils.StageCache.Get().GetId(stage).ToLongInt()
-#     ret_val = omni.metrics.assembler.core.get_metrics_assembler_interface().check_layers(
-#         stage.GetRootLayer().identifier, sdf_layer.identifier, stage_id,
-#     )
-#     should_use_add_reference_command = ret_val["ret_val"] != 0
-
-#     prims = []
-
-#     # TODO
-#     # with pxr.Sdf.ChangeBlock():
-#     if True:
-#         for path in paths:
-#             prim = stage.GetPrimAtPath(path)
-#             if not prim.IsValid():
-#                 # TODO make prim_type customizable??
-#                 prim = stage.DefinePrim(path, "Xform")    
-
-#             if should_use_add_reference_command:
-#                 try:
-#                     omni.usd.commands.AddReferenceCommand(
-#                         stage=stage,
-#                         prim_path=prim.GetPath(), 
-#                         reference=pxr.Sdf.Reference(resource),
-#                     ).do()
-#                 except Exception as error:
-#                     warnings.warn(
-#                         f"USD reference {resource} may have divergent units, "
-#                         f"please either enable extension `omni.usd.metrics.assembler` "
-#                         f"or convert into right units: {error}"
-#                     )
-#                     is_success = prim.GetReferences().AddReference(resource)
-#                     if not is_success:
-#                         raise RuntimeError(f"Invalid USD reference: {resource}")
-#             else:
-#                 is_success = prim.GetReferences().AddReference(resource)
-#                 if not is_success:
-#                     raise RuntimeError(f"Invalid USD reference: {resource}")
-            
-#             prims.append(prim)
-        
-#     return prims
+    return stage
 
 
-# TODO next
 def usd_add_reference(
     stage: "pxr.Usd.Stage",
     paths: Iterable[str],

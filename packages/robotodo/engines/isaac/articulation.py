@@ -47,6 +47,7 @@ from robotodo.engines.isaac._utils.usd import (
     USDXformView,
 )
 
+
 class Joint(ProtoJoint):
     # __slots__ = ["_usd_prim_ref", "_scene"]
 
@@ -849,14 +850,18 @@ class ArticulationDriver:
         n_timesteps = n_timesteps_p
 
         for timestep in range(n_timesteps):
-            dof_target_positions = self.dof_target_positions
-            # TODO torch 
-            dof_target_positions[..., dof_indices] = dof_positions[:, timestep, :].to(dof_target_positions.device)
+            dof_target_positions = self.dof_target_positions            
+            dof_target_positions[..., dof_indices] = torch.asarray(
+                dof_positions[:, timestep, :], 
+                device=dof_target_positions.device,
+            )
             self.dof_target_positions = dof_target_positions
 
             dof_target_velocities = self.dof_target_velocities
-            # TODO torch 
-            dof_target_velocities[..., dof_indices] = dof_velocities[:, timestep, :].to(dof_target_positions.device)
+            dof_target_velocities[..., dof_indices] = torch.asarray(
+                dof_velocities[:, timestep, :],
+                device=dof_target_positions.device,
+            )
             self.dof_target_velocities = dof_target_velocities
 
             # TODO use dt for timeout

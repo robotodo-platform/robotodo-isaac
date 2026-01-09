@@ -16,6 +16,7 @@ import queue
 from typing import TypedDict, NotRequired, Unpack, Awaitable, Callable, Any
 
 import nest_asyncio
+from robotodo.engines.isaac._utils.io import redirect_stdout_libc
 
 
 def _omni_create_app(argv: list[str] = []) -> "omni.kit.app.IApp":
@@ -57,7 +58,7 @@ def _omni_create_app(argv: list[str] = []) -> "omni.kit.app.IApp":
         except Exception as error:
             raise RuntimeError(
                 f"Failed to load the isaacsim kernel. To possibly resolve the problem: "
-                f"- If you are in a conda environment, run `conda install 'libstdcxx>11'`. "
+                f"- If you are in a Conda environment, run `conda install 'libstdcxx>11'`. "
                 f"- If you are using Linux, also run `ldd --version` to check your GLIC version "
                 f"and upgrade your Linux distribution if the version is below 2.35. "
                 f"For more information, see https://robotodo-isaac.readthedocs.io/en/latest/content/manuals/tutorial-000_installation.html"
@@ -74,8 +75,8 @@ def _omni_create_app(argv: list[str] = []) -> "omni.kit.app.IApp":
             kit_app = omni.kit_app.KitApp()
 
         # TODO
-        nest_asyncio.apply()
-        # nest_asyncio._patch_loop(asyncio.get_event_loop())
+        # nest_asyncio.apply()
+        nest_asyncio._patch_loop(asyncio.get_event_loop())
 
         kit_app.startup([
             *argv,
@@ -99,13 +100,11 @@ def _omni_create_app(argv: list[str] = []) -> "omni.kit.app.IApp":
         # TODO
         app = kit_app._app
 
-        # while not app.is_app_ready():
-        #     app.update()
-
         return app
 
 
 class KernelConfig(TypedDict):
+    verbose: NotRequired[bool]
     _omni_config_path: NotRequired[str]
     _omni_extra_argv: NotRequired[list[str]]
 
@@ -225,12 +224,13 @@ class Kernel:
 
             "--/app/docks/disabled=true",
             "--/app/window/hideUi=true", # TODO
-            "--/app/enableStdoutOutput=false",
 
             # logging
             "--/log/file=",
-            "--/log/outputStreamLevel=Error",
+            "--/log/outputStream=stderr",
+            "--/log/outputStreamLevel=fatal",
             "--/log/async=true",
+            "--/app/enableStdoutOutput=false",
 
             # TODO NOTE ensure rendering syncd with .step
             # "--/app/asyncRendering=false",
@@ -265,7 +265,8 @@ class Kernel:
             # TODO
             # "--/exts/omni.kit.async_engine/updateSubscriptionOrder=0",
             "--/exts/omni.kit.async_engine/keep_loop_running=false",
-            # "--/exts/omni.kit.async_engine/spinLoopOncePerUpdate=true",
+            # TODO NOTE unpatched `asyncio.run` will not return when this is false?
+            "--/exts/omni.kit.async_engine/spinLoopOncePerUpdate=true",
 
             # TODO
             # "--/app/asyncRendering=true",
@@ -274,6 +275,7 @@ class Kernel:
             # "--/app/asyncRenderingLowLatency=false",
             # TODO NOTE causes issues with omni.replicator.core
             # "--/renderer/asyncInit=true",
+
             # # "--/exts/omni.replicator.core/numFrames=1",
             "--/omni/replicator/captureOnPlay=false",
             "--/app/settings/fabricDefaultStageFrameHistoryCount=3",
@@ -288,55 +290,59 @@ class Kernel:
         if extra_argv is not None:
             argv.extend(extra_argv)
 
-        app = _omni_create_app(argv)
-        # TODO
-        # _omni_suppress_appwindow()
+        with contextlib.ExitStack() as contexts:
+            if not self._config.get("verbose", False):
+                contexts.enter_context(redirect_stdout_libc(None))
+                contexts.enter_context(contextlib.redirect_stdout(None))
 
-        extension_manager = app.get_extension_manager()
-
-        # TODO
-        def _on_appwindow_requested():
-            _omni_suppress_appwindow(app)
-            # TODO ui: menu needs to be created before everything else??
-            extension_manager.set_extension_enabled("omni.kit.menu.utils", True)
-
-        # TODO
-        self._todo = extension_manager.subscribe_to_extension_enable(
-            on_enable_fn=lambda _: _on_appwindow_requested(),
-            ext_name="omni.appwindow",
-        )
-
-        for extension_name in [
-            # NOTE required for functionality due to some unknown bugs.
-            # Some must be enabled during startup
-            "omni.physics.physx",
-            "omni.physics.stageupdate",
-            # "omni.physx.tensors",
-            # "omni.hydra.rtx",
-            # "omni.hydra.pxr",
+            app = _omni_create_app(argv)
             # TODO
-            # "omni.replicator.core",
-            # TODO why?
-            "omni.graph.core",
-            # TODO ui: menu needs to be created before everything else??
-            # "omni.kit.menu.utils",
-            # "omni.kit.manipulator.camera", # NOTE prevent error messages when missing
-            # TODO HACK right now this just keeps the GUI layout working
-            # "isaacsim.asset.importer.urdf",
-            # TODO NOTE required for docking to work?
-            # "omni.kit.mainwindow",
-            # TODO necesito?
-            "omni.usd.schema.metrics.assembler",
-        ]:
-            extension_manager.set_extension_enabled(extension_name, True)
-        extension_manager.process_and_apply_all_changes()
+            # _omni_suppress_appwindow()
 
-        # TODO
-        # _omni_suppress_subwindows()
+            extension_manager = app.get_extension_manager()
 
-        # TODO
-        while not app.is_app_ready():
-            app.update()
+            # TODO
+            def _on_appwindow_requested():
+                _omni_suppress_appwindow(app)
+                # TODO ui: menu needs to be created before everything else??
+                extension_manager.set_extension_enabled("omni.kit.menu.utils", True)
+            # TODO
+            self._todo = extension_manager.subscribe_to_extension_enable(
+                on_enable_fn=lambda _: _on_appwindow_requested(),
+                ext_name="omni.appwindow",
+            )
+
+            for extension_name in [
+                # NOTE required for functionality due to some unknown bugs.
+                # Some must be enabled during startup
+                "omni.physics.physx",
+                "omni.physics.stageupdate",
+                # "omni.physx.tensors",
+                # "omni.hydra.rtx",
+                # "omni.hydra.pxr",
+                # TODO
+                # "omni.replicator.core",
+                # TODO why?
+                "omni.graph.core",
+                # TODO ui: menu needs to be created before everything else??
+                # "omni.kit.menu.utils",
+                # "omni.kit.manipulator.camera", # NOTE prevent error messages when missing
+                # TODO HACK right now this just keeps the GUI layout working
+                # "isaacsim.asset.importer.urdf",
+                # TODO NOTE required for docking to work?
+                # "omni.kit.mainwindow",
+                # TODO necesito?
+                "omni.usd.schema.metrics.assembler",
+            ]:
+                extension_manager.set_extension_enabled(extension_name, True)
+            extension_manager.process_and_apply_all_changes()
+
+            # TODO
+            # _omni_suppress_subwindows()
+
+            # TODO
+            while not app.is_app_ready():
+                app.update()
 
         # TODO
         def should_invalidate():
@@ -352,92 +358,6 @@ class Kernel:
             else:
                 return app
 
-    # @functools.cached_property
-    # def _run_forever_cache(self):
-    #     app = self._app
-    #     async def _impl():
-    #         # loop = asyncio.get_running_loop()
-    #         # TODO 
-    #         # while app.is_running():
-    #         while True:
-    #             # TODO
-    #             # print("TODO")
-    #             await asyncio.sleep(0)
-    #             app.update()
-    #             # TODO just app.update() ??
-    #             # loop.call_soon_threadsafe(app.update)
-    #             # try: app.update()
-    #             # finally: continue
-    #     # TODO check loop
-    #     if not asyncio.get_event_loop().is_running():
-    #         warnings.warn(
-    #             f"{self.run_forever} called without a running asyncio event loop. "
-    #             f"Updates are paused until an event loop is running"
-    #             # f"For more information, see TODO"
-    #         )
-    #     omni = self._omni
-    #     self._omni_enable_extension("omni.kit.async_engine")
-    #     task = omni.kit.async_engine.run_coroutine(_impl())
-    #     # app.update()
-    #     # task = asyncio.create_task(_impl())
-    #     def should_invalidate():
-    #         return task.done()
-    #     return task, should_invalidate
-
-    # TODO
-    @functools.cached_property
-    def _run_forever_cache(self):
-        app = self._app
-        loop = asyncio.get_event_loop()
-        if not loop.is_running():
-            warnings.warn(
-                f"{self.run_forever} called without a running asyncio event loop. "
-                f"Updates are paused until an event loop is running. "
-                f"For more information, see TODO"
-            )
-
-        future = asyncio.Future(loop=loop)
-
-        def f():
-            if future.done():
-                return
-            # if not app.is_running():
-            #     # TODO
-            #     print("TODO")
-            app.update()
-            loop.call_soon_threadsafe(f)
-        
-        loop.call_soon_threadsafe(f)
-
-        def should_invalidate():
-            return future.done()
-        return future, should_invalidate
-
-    # TODO deprecate
-    # TODO spin app loop only when necessary; exit loop when idle: i.e. no tasks beside internal omni tasks
-    def run_forever(self):
-        # TODO
-        import warnings
-        warnings.warn(DeprecationWarning(f"Deprecated"))
-
-        while True:
-            task, should_invalidate = self._run_forever_cache
-            if should_invalidate():
-                del self._run_forever_cache
-            else:
-                return task
-
-    # TODO
-    # async def stop(self):
-    #     # TODO
-    #     # self._app.shutdown()
-    #     self.run_forever().cancel()
-
-    # def step(self):
-    #     # TODO
-    #     self._app.update()
-
-    # 
     @functools.cached_property
     def _carb(self):
         # TODO
@@ -491,112 +411,44 @@ class Kernel:
         for name in names:
             ext_manager.set_extension_enabled(name, enabled)
         if immediate:
+            # TODO FIXME perf: this is expensive ~2ms
             ext_manager.process_and_apply_all_changes()
 
     def _omni_import_module(self, module: str):
         return __import__(module)
-
-    # TODO deprecate??
-    # TODO better lifecycle mgmt: detect if kernel is autostepping
-    # TODO seealso: https://github.com/isaac-sim/IsaacSim/blob/aa503a9bbf92405bbbcfe5361e1c4a74fe10d689/source/extensions/isaacsim.simulation_app/isaacsim/simulation_app/simulation_app.py#L717
-    def _omni_run_coroutine(
-        self,
-        coroutine: Awaitable,
-    ):
-        omni = self._omni
-        self._omni_enable_extension("omni.kit.async_engine")
-
-        # task_or_future = omni.kit.async_engine.run_coroutine(coroutine)
-        # if run_until_complete:
-        #     while not task_or_future.done():
-        #         # self._app.update()
-        #         # TODO
-        #         self._callback_queue.put(self._app.update)
-        #     # # TODO
-        #     # self.run_forever()
-        #     # match task_or_future:
-        #     #     case _ if asyncio.isfuture(task_or_future):
-        #     #         asyncio.get_running_loop() \
-        #     #             .run_until_complete(task_or_future)
-        #     #     case _:
-        #     #         # TODO handle concurrent.futures.Future??
-        #     #         raise ValueError(f"TODO: {task_or_future}")
-        # return task_or_future
-
-        future = concurrent.futures.Future()
-
-        task_or_future = omni.kit.async_engine.run_coroutine(coroutine)
-        # TODO
-        if True:
-            while not task_or_future.done():
-                # TODO FIXME deadlock
-                self._app.update()
-                # TODO
-            # # TODO
-            # self.run_forever()
-            # match task_or_future:
-            #     case _ if asyncio.isfuture(task_or_future):
-            #         asyncio.get_running_loop() \
-            #             .run_until_complete(task_or_future)
-            #     case _:
-            #         # TODO handle concurrent.futures.Future??
-            #         raise ValueError(f"TODO: {task_or_future}")
-        future.set_result(task_or_future.result())
-
-        # TODO
-        return future
-    
-    # # TODO next
-    # # TODO seealso: https://github.com/isaac-sim/IsaacSim/blob/aa503a9bbf92405bbbcfe5361e1c4a74fe10d689/source/extensions/isaacsim.simulation_app/isaacsim/simulation_app/simulation_app.py#L717
-    # def _omni_run_coroutine(
-    #     self,
-    #     coroutine: Awaitable,
-    # ):
-    #     omni = self._omni
-    #     self._omni_enable_extension("omni.kit.async_engine")
-
-    #     future = concurrent.futures.Future()
-    #     task_or_future = omni.kit.async_engine.run_coroutine(coroutine)
-
-    #     app = self._app
-    #     loop = asyncio.get_event_loop()
-    #     def call_soon(func: ...):
-    #         # TODO
-    #         # return func()
-    #         task_or_future
-        
-    #         if loop.is_running():
-    #             loop.call_soon_threadsafe(func)
-    #         else:
-    #             func()
-
-    #     # TODO use ref count instead
-    #     def f():
-    #         if task_or_future.done():
-    #             future.set_result(task_or_future.result())
-    #             return
-    #         app.update()
-    #         call_soon(f)
-    #     call_soon(f)
-
-    #     return future
-
-    # TODO
-    # _todo_lock = threading.Lock()
-
 
     class _Runner:
         def __init__(self, app: ...):
             self._app = app
             self._ref_count = 0
 
+        # TODO
+        # @functools.cached_property
+        # def _cached_future(self):
+        #     async def _impl():
+        #         while self._ref_count > 0:
+        #             await asyncio.sleep(0)
+        #             self._app.update()
+        #     return asyncio.create_task(_impl())
+        
+        # TODO
         @functools.cached_property
         def _cached_future(self):
-            async def _impl():
-                while self._ref_count > 0:
-                    self._app.update()
-                    await asyncio.sleep(0)
-            return asyncio.create_task(_impl())
+            future = asyncio.Future()
+            loop = future.get_loop()
+
+            def f():
+                if self._ref_count <= 0:
+                    future.set_result(None)
+                if future.done():
+                    return
+                # if not app.is_running():
+                #     return
+                self._app.update()
+                loop.call_soon(f)
+            
+            loop.call_soon_threadsafe(f)
+            return future
             
         def _ensure_future(self):
             future = self._cached_future
@@ -617,58 +469,6 @@ class Kernel:
     def _runner(self):
         return self._Runner(self._app)
 
-    # TODO rm
-    # def _omni_ensure_future(
-    #     self,
-    #     coroutine: Awaitable,
-    # ) -> asyncio.Future:
-    #     omni = self._omni
-    #     self._omni_enable_extension("omni.kit.async_engine")
-
-    #     # TODO
-    #     task_or_future = omni.kit.async_engine.run_coroutine(coroutine)
-    #     loop = task_or_future.get_loop()
-
-    #     # _is_done = False
-    #     # def _todo_done_callback(future: ...):
-    #     #     nonlocal _is_done
-    #     #     _is_done = True
-    #     # task_or_future.add_done_callback(_todo_done_callback)
-        
-
-    #     # TODO
-    #     # loop = asyncio.get_event_loop()
-    #     # task_or_future = asyncio.ensure_future(coroutine, loop=loop)
-
-    #     # TODO use ref count instead
-    #     app = self._app
-    #     def f(f_self: ..., task_or_future: ...):
-    #         # nonlocal _is_done
-    #         # if _is_done:
-    #         #     return
-    #         if task_or_future.done():
-    #             return
-    #         # TODO 
-    #         # if not app.is_running():
-    #         #     # TODO
-    #         #     print("TODO !!!!")
-    #         # try: app.update()
-    #         # finally: pass
-    #         # TODO
-    #         app.update()
-    #         # TODO
-    #         loop.call_soon(f_self, f_self, task_or_future)
-    #     loop.call_soon_threadsafe(f, f, task_or_future)
-
-    #     match task_or_future:
-    #         case _ if asyncio.isfuture(task_or_future):
-    #             return task_or_future
-    #         case concurrent.futures.Future():
-    #             return asyncio.wrap_future(task_or_future)
-    #         case _:
-    #             # TODO
-    #             raise ValueError(f"TODO: {task_or_future}")
-    
     # TODO
     def _omni_ensure_future(
         self,
@@ -680,9 +480,10 @@ class Kernel:
         # TODO
         task_or_future = omni.kit.async_engine.run_coroutine(coroutine)
         self._runner.acquire()
-        def _todo_done_callback(_future: ...):
+        def _done_callback(_future: ...):
             self._runner.release()
-        task_or_future.add_done_callback(_todo_done_callback)
+            task_or_future.remove_done_callback(_done_callback)
+        task_or_future.add_done_callback(_done_callback)
 
         match task_or_future:
             case _ if asyncio.isfuture(task_or_future):
@@ -701,7 +502,7 @@ Default kernel.
 """
 
 
-# TODO
+# TODO deprecate
 def get_running_kernel():
     # default_kernel.run_forever()
     return default_kernel

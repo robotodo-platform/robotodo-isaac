@@ -35,6 +35,7 @@ from robotodo.engines.isaac._utils.usd import (
     USDPrimPathExpressionRef,
     usd_prims_get_meters_per_unit,
 )
+from robotodo.engines.isaac._utils.render import omni_usd_wait_next_render
 
 
 # TODO
@@ -208,6 +209,16 @@ class Camera(ProtoCamera):
                             settings.set("/rtx/rendermode", "PathTracing")
                         case _:
                             ...
+
+                    # TODO
+                    # render_product_prim = self._scene._usd_stage.GetPrimAtPath(
+                    #     render_product.path
+                    # )
+                    # pxr = self._scene._kernel._pxr
+                    # render_product_prim.CreateAttribute("omni:rtx:material:db:syncLoads", pxr.Sdf.ValueTypeNames.Bool).Set(True)
+                    # render_product_prim.CreateAttribute("omni:rtx:scene:hydra:materialSyncLoads", pxr.Sdf.ValueTypeNames.Bool).Set(True)
+                    # render_product_prim.CreateAttribute("omni:rtx:scene:hydra:mdlMaterialWarmup", pxr.Sdf.ValueTypeNames.Bool).Set(True)    
+
                 case _:
                     pass
 
@@ -228,6 +239,7 @@ class Camera(ProtoCamera):
 
     # TODO
     # TODO perf: auto detach when not in use?
+    # TODO perf: attach/detach on demand
     @functools.cache
     def _omni_get_render_annotator(
         self,
@@ -246,16 +258,66 @@ class Camera(ProtoCamera):
         omni = self._scene._kernel._omni
         self._scene._kernel._omni_enable_extension("omni.replicator.core")
 
+        # TODO init syntheticdata to prevent exc on .attach??
+        # omni.syntheticdata.Initialize()
         annotator = omni.replicator.core.AnnotatorRegistry.get_annotator(
-            name, device=device, do_array_copy=copy
+            name, 
+            device=device, 
+            do_array_copy=copy,
         )
         annotator.attach(self._omni_get_render_product(resolution=resolution))
 
         return annotator
+    
+    # TODO unused
+    @functools.cache
+    def _omni_get_render_annotator_exec_event(
+        self,
+        annotator: ...,
+    ):
+
+        node = annotator.get_node()
+
+        import omni
+
+        Keys = omni.graph.core.Controller.Keys
+
+        event_node_path = f"{node.get_prim_path()}/TODO"
+        _todo_carb_event_name = f"TODOeventname.{id(self)}"
+
+        omni.graph.core.Controller.edit(
+            node.get_graph(),
+            edit_commands={
+                Keys.CREATE_NODES: [
+                    # TODO
+                    (event_node_path, "omni.graph.action.SendMessageBusEvent")
+                ],
+                Keys.SET_VALUES: [
+                    (f"{event_node_path}.inputs:eventName", _todo_carb_event_name),
+                ],
+                Keys.CONNECT: [
+                    (f"{node.get_prim_path()}.outputs:exec", f"{event_node_path}.inputs:execIn"),
+                ],
+            },
+            allow_exists_node=True,
+            undoable=True,
+        )
+
+        # TODO
+        import omni, carb
+        bus = omni.kit.app.get_app().get_message_bus_event_stream()
+        msg_t = carb.events.type_from_string(_todo_carb_event_name)
+
+        return bus, msg_t
+
+        # TODO doc
+        # def subscribe(_on_event: ...):
+        #     return bus.create_subscription_to_pop_by_type(msg_t, _on_event)
+        # return subscribe
 
     _omni_use_synchronization: bool = False
 
-    async def _omni_get_frame(
+    async def _omni_read_frame(
         self,
         name: _OmniRenderName,
         resolution: Resolution,
@@ -282,14 +344,6 @@ class Camera(ProtoCamera):
                     settings.set("/exts/omni.replicator.core/Orchestrator/enabled", True)
 
                     self._scene._omni_ensure_current_stage()
-                    # TODO
-                    # self._scene._kernel._omni_ensure_future
-                    # TODO
-                    # await omni.replicator.core.orchestrator.step_async(
-                    #     delta_time=0,
-                    #     pause_timeline=False,
-                    #     wait_for_render=True,
-                    # )
                     await self._scene._kernel._omni_ensure_future(
                         omni.replicator.core.orchestrator.step_async(
                             delta_time=0,
@@ -310,13 +364,94 @@ class Camera(ProtoCamera):
                     # )
 
                     # TODO rm??
-                    await self._scene._kernel._omni_ensure_future(
-                        self._scene._kernel._app.next_update_async()
-                    )
+                    # await self._scene._kernel._omni_ensure_future(
+                    #     self._scene._kernel._app.next_update_async()
+                    # )
 
+                    # TODO
+                    # TODO seealso: https://docs.omniverse.nvidia.com/kit/docs/omni.kit.hydra_texture/1.5.3/Events.html
+                    # omni = self._scene._kernel._omni
+                    # await self._scene._kernel._omni_ensure_future(
+                    #     self._omni_get_render_product(resolution=resolution)
+                    #     .hydra_texture.get_event_stream()
+                    #     .next_event_by_type(omni.hydratexture.EVENT_TYPE_DRAWABLE_CHANGED)
+                    # )
+
+                    # # TODO FIXME sync
+                    # omni = self._scene._kernel._omni
+                    # # TODO filter
+                    # await self._scene._kernel._omni_ensure_future(
+                    #     self._scene._omni_usd_context.get_rendering_event_stream()
+                    #     .next_event_by_type(omni.usd.StageRenderingEventType.HYDRA_ENGINE_FRAMES_COMPLETE)
+                    # )
+                    # # TODO
+                    # bus, event_type = self._omni_get_render_annotator_exec_event(render_annotator)
+                    # await self._scene._kernel._omni_ensure_future(bus.next_event_by_type(event_type))
+
+                    # TODO
+                    omni = self._scene._kernel._omni
+                    async def todo():
+                        # TODO
+                        # _sdg_iface = omni.syntheticdata.scripts.helpers._get_syntheticdata_iface()
+                        # e = (await (
+                        #     self._scene._omni_usd_context.get_rendering_event_stream()
+                        #     .next_event_by_type(omni.usd.StageRenderingEventType.NEW_FRAME)
+                        # )).payload
+                        # rp_path, _, _ = _sdg_iface.parse_rendered_simulation_event(e["product_path_handle"], e["results"])
+                        # TODO
+                        # await omni.syntheticdata.scripts.sensors.next_render_simulation_async(
+                        #     self._omni_get_render_product(resolution=resolution)
+                        # )
+                        # await (
+                        #     self._scene._omni_usd_context.get_rendering_event_stream()
+                        #     # .next_event_by_type(omni.usd.StageRenderingEventType.HYDRA_ENGINE_FRAMES_COMPLETE)
+                        #     .next_event_by_type(omni.usd.StageRenderingEventType.HYDRA_ENGINE_FRAMES_ADDED)
+                        # )
+                        # settings = self._scene._kernel._carb.settings.get_settings()
+                        # for _ in range(max(0, settings.get("/app/settings/fabricDefaultStageFrameHistoryCount") or 0)):
+                        #     # await self._scene._kernel._app.next_update_async()
+                        #     await (
+                        #         self._scene._omni_usd_context.get_rendering_event_stream()
+                        #         .next_event_by_type(omni.usd.StageRenderingEventType.HYDRA_ENGINE_FRAMES_COMPLETE)
+                        #     )
+                        
+                        # TODO
+                        # render_annotator.get_node().get_graph().evaluate()
+                        # TODO
+                        # await omni.graph.core.Controller.evaluate(render_annotator.get_node().get_graph())
+                        
+                        # TODO allow opt-out
+                        # if False:
+                        #     await (
+                        #         self._scene._omni_usd_context.get_rendering_event_stream()
+                        #         # .next_event_by_type(omni.usd.StageRenderingEventType.HYDRA_ENGINE_FRAMES_COMPLETE)
+                        #         .next_event_by_type(omni.usd.StageRenderingEventType.HYDRA_ENGINE_FRAMES_ADDED)
+                        #     )
+                        # bus, event_type = self._omni_get_render_annotator_exec_event(render_annotator)
+                        # await (
+                        #     bus.next_event_by_type(event_type)
+                        # )
+
+                        # NOTE this prevents initial blank frame
+                        while self._scene._omni_usd_context.get_stage_streaming_status():
+                            await self._scene._kernel._app.next_update_async()
+
+                        # TODO perf: upstream: async iterator
+                        render_product = self._omni_get_render_product(resolution=resolution)
+                        await omni_usd_wait_next_render(
+                            kernel=self._scene._kernel, 
+                            usd_context=self._scene._omni_usd_context, 
+                            target_render_product_path=render_product.path,
+                        )
+
+                    # TODO
+                    await self._scene._kernel._omni_ensure_future(todo())
+
+            # TODO perf: eval on demand for lower overhead?
             frame_tiled = render_annotator.get_data(
                 # TODO
                 do_array_copy=True,
+                use_legacy_structure=True,
             )
             # TODO check data type: this can be numpy if device="cpu" !!!!
             # TODO better way to handle this??
@@ -346,7 +481,7 @@ class Camera(ProtoCamera):
     ):
         resolution = self.Resolution._make(resolution)
         return (
-            torch.asarray(await self._omni_get_frame(name="rgb", resolution=resolution))
+            torch.asarray(await self._omni_read_frame(name="rgb", resolution=resolution))
             / 255
         )
 
@@ -356,7 +491,7 @@ class Camera(ProtoCamera):
     ):
         resolution = self.Resolution._make(resolution)
         return torch.asarray(
-            await self._omni_get_frame(
+            await self._omni_read_frame(
                 name="distance_to_image_plane", resolution=resolution
             )
         )

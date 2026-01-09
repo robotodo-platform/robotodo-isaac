@@ -26,6 +26,7 @@ from robotodo.engines.isaac._utils.usd import (
     usd_get_stage_id, 
     usd_create_stage, 
     usd_load_stage,
+    usd_save_stage,
     usd_physics_ensure_physics_scene,
 )
 from robotodo.engines.isaac._utils.ui import (
@@ -136,15 +137,7 @@ class Scene(ProtoScene):
     # TODO buffer
     def save(self, destination: str | IO | None = None):
         stage = self._usd_stage_ref()
-        match destination:
-            case str():
-                # TODO
-                stage.Export(destination)
-            case None:
-                stage.Save()
-                stage.SaveSessionLayers()
-            case _:
-                raise NotImplementedError("TODO")
+        usd_save_stage(stage, resource=destination, kernel=self.kernel)
 
     # TODO rm?
     @property
@@ -187,9 +180,9 @@ class Scene(ProtoScene):
     
     @property
     def _omni_physx(self):
-        self._omni_ensure_current_stage()
         self._kernel._omni_enable_extensions(["omni.physx"])
 
+        self._omni_ensure_current_stage()
         physx = self._kernel._omni.physx.get_physx_interface()
         # TODO attach stage
 
@@ -199,9 +192,9 @@ class Scene(ProtoScene):
     # TODO cache and ensure current stage !!!!
     @property
     def _omni_physx_simulation(self):
-        self._omni_ensure_current_stage()
         self._kernel._omni_enable_extensions(["omni.physx"])
 
+        self._omni_ensure_current_stage()
         physx_sim = self._kernel._omni.physx.get_physx_simulation_interface()
         # TODO FIXME: this causes timeline to stop working: 
         # see: https://forums.developer.nvidia.com/t/omniverse-physx-time-stepping-blocking/284664/10
@@ -354,15 +347,6 @@ class Scene(ProtoScene):
         #     )
         #     if not is_success:
         #         raise RuntimeError("TODO")
-
-    @functools.cached_property
-    def _omni_timeline(self):
-        # TODO ensure current stage !!!!
-        self._omni_ensure_current_stage()
-        omni = self._kernel._omni
-        self._kernel._omni_enable_extension("omni.timeline")
-        self._kernel._omni_import_module("omni.timeline")
-        return omni.timeline.acquire_timeline_interface().get_timeline()
     
     class _PlayController:
         _enabled: bool | None = None
@@ -375,22 +359,20 @@ class Scene(ProtoScene):
             self._scene = scene
 
         async def _enable(self):
-            timeline = self._scene._omni_timeline
+            timeline = self._scene._omni_usd_context.get_timeline()
             timeline.set_auto_update(True)
             timeline.play()
             timeline.commit()
-
             if self._future is None or self._future.done():
                 self._future = self._scene._kernel._omni_ensure_future(
                     asyncio.Event().wait()
                 )
 
-        async def _disable(self):
-            timeline = self._scene._omni_timeline
+        async def _disable(self):    
+            timeline = self._scene._omni_usd_context.get_timeline()
             timeline.set_auto_update(False)
             timeline.pause()
             timeline.commit()
-
             if self._future is not None:
                 self._future.cancel()
 
@@ -430,35 +412,6 @@ class Scene(ProtoScene):
         controller = self._play_controller
         controller._enabled = enabled
         return controller
-
-    # TODO DEPRECATE in favor of `await scene.play()` ##################
-    @property
-    def autostepping(self):
-        # TODO
-        warnings.warn(DeprecationWarning("Deprecated. Use `await scene.play()` instead"))
-
-        timeline = self._omni_timeline
-        return timeline.is_playing() and timeline.is_auto_updating()
-    
-    @autostepping.setter
-    def autostepping(self, value):
-        # TODO
-        warnings.warn(DeprecationWarning("Deprecated. Use `await scene.play()` instead"))
-
-        timeline = self._omni_timeline
-        # TODO
-        # timeline.get_timeline_event_stream
-        if value:
-            timeline.set_auto_update(True)
-            timeline.play()
-            timeline.commit()
-            # TODO ensure kernel stepping: better api??
-            self._kernel.run_forever()
-        else:
-            timeline.set_auto_update(False)
-            timeline.pause()
-            timeline.commit()
-    # TODO DEPRECATE ###############################################
 
     # TODO
     # TODO ref https://docs.omniverse.nvidia.com/kit/docs/omni_physics/108.0/dev_guide/simulation_control/simulation_control.html
@@ -651,37 +604,6 @@ class SceneViewer:
         controller._mode = mode
         return controller
 
-    # TODO deprecate #############################
-    @property
-    def mode(self) -> Literal["viewing", "editing"] | None:
-        settings = self._scene._kernel._carb.settings.get_settings()
-        match settings.get("/app/window/hideUi"):
-            case True:
-                return "viewing"
-            case False:
-                return "editing"
-        return None
-            
-    @mode.setter
-    def mode(self, value: ...):
-        settings = self._scene._kernel._carb.settings.get_settings()
-        match value:
-            # TODO
-            case None | "viewing":
-                settings.set("/app/window/hideUi", True)
-                # TODO this causes issues with the isaacsim registry in content browser. why????
-                omni_enable_viewing_experience(kernel=self._scene._kernel)
-            case "editing":
-                # TODO
-                settings.set("/app/window/hideUi", False)
-                omni_enable_editing_experience(kernel=self._scene._kernel)
-            case None:
-                # TODO disable everything
-                ...
-            case _:
-                raise ValueError(f"TODO")
-    # TODO deprecate #############################
-
     # TODO
     @property
     def selected_entity(self):
@@ -706,7 +628,7 @@ class SceneViewer:
         selection = omni.usd.get_context().get_selection()
         selection.set_selected_prim_paths(entity.path)
 
-    # TODO
+    # TODO deprecate: in tiled rendering this shows a single gizmo in the frame which is incorrect
     @property
     def _isaac_debug_draw_interface(self):
         # TODO

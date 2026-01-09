@@ -19,7 +19,6 @@ from robotodo.engines.isaac._utils.usd import (
     is_usd_prim_ref,
     USDPrimPathRef, 
     USDPrimPathExpressionRef,
-    usd_physx_query_articulation_properties,
 )
 
 

@@ -21,8 +21,6 @@ class TestCamera:
         camera = Camera.create("/Camera{0..16}", scene=scene)
         assert (await camera.read_rgba()) is not None
 
-        # await scene.kernel.stop()
-
     @pytest.mark.asyncio(loop_scope="session")
     async def test_read_rgba_content(self):
         scene = Scene.load(
@@ -30,16 +28,24 @@ class TestCamera:
         )
 
         camera = Camera.create("/CameraSingle", scene=scene)
-        camera.pose = Pose.from_lookat([1, 1, 1], [0, 0, 0])
 
+        camera.pose = Pose.from_lookat([1, 1, 1], [0, 0, 0])
         rgba_image = await camera.read_rgba()
         assert not numpy.allclose(rgba_image[..., [0, 1, 2]].numpy(force=True), 0.)
+
+        camera.pose = Pose()
+        rgba_image = await camera.read_rgba()
+        assert numpy.allclose(rgba_image[..., [0, 1, 2]].numpy(force=True), 0.)
 
         camera = Camera.create("/Camera{1..2}", scene=scene)
-        camera.pose = Pose.from_lookat([1, 1, 1], [0, 0, 0])
 
+        camera.pose = Pose.from_lookat([1, 1, 1], [0, 0, 0])
         rgba_image = await camera.read_rgba()
         assert not numpy.allclose(rgba_image[..., [0, 1, 2]].numpy(force=True), 0.)
+
+        camera.pose = Pose()
+        rgba_image = await camera.read_rgba()
+        assert numpy.allclose(rgba_image[..., [0, 1, 2]].numpy(force=True), 0.)
 
     @pytest.mark.asyncio(loop_scope="session")
     async def test_read_depth(self):
@@ -51,8 +57,6 @@ class TestCamera:
         ...
         camera = Camera.create("/Camera{0..16}", scene=scene)
         assert (await camera.read_depth()) is not None
-
-        # await scene.kernel.stop()
 
     @pytest.mark.asyncio(loop_scope="session")
     async def test_properties(self):

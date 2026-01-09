@@ -1,3 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+
+"""
+UI utilities.
+"""
+
+
 import asyncio
 
 from robotodo.engines.isaac.kernel import Kernel
@@ -44,7 +51,7 @@ def omni_enable_viewing_experience(kernel: Kernel):
 
     kernel._omni_enable_extensions(extension_names)
 
-    carb.settings.get_settings().set("/app/docks/disabled", False)
+    # carb.settings.get_settings().set("/app/docks/disabled", False)
     for _ in range(1):
         omni.ui.Workspace.restore_workspace(
             workspace_dump=workspace_layout,
@@ -383,7 +390,7 @@ def omni_enable_editing_experience(kernel: Kernel):
     kernel._omni_enable_extensions(extension_names)
 
     # TODO
-    carb.settings.get_settings().set("/app/docks/disabled", False)
+    # carb.settings.get_settings().set("/app/docks/disabled", False)
     for _ in range(2):
         omni.ui.Workspace.restore_workspace(
             workspace_dump=workspace_layout,
