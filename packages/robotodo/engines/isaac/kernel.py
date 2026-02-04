@@ -35,6 +35,7 @@ def _omni_create_app(argv: list[str] = []) -> "omni.kit.app.IApp":
             `site-packages/omni/kernel/py/omni/kit/app/_impl/__init__.py`
         """
 
+        import os
         import sys
         import logging
         import asyncio
@@ -42,7 +43,8 @@ def _omni_create_app(argv: list[str] = []) -> "omni.kit.app.IApp":
         meta_path_orig = list(sys.meta_path)
         logging_handlers_orig = list(logging.root.handlers)
         logging_level_orig = int(logging.root.level)
-        asyncio_run_orig = asyncio.run
+        # asyncio_run_orig = asyncio.run
+        os.environ["OMNI_KIT_ACCEPT_EULA"] = "yes"
 
         yield
 
@@ -50,30 +52,31 @@ def _omni_create_app(argv: list[str] = []) -> "omni.kit.app.IApp":
         logging.root.handlers = logging_handlers_orig
         logging.root.level = logging_level_orig
         # asyncio.run = asyncio_run_orig
+        os.environ.pop("OMNI_KIT_ACCEPT_EULA")
 
     with _omni_undo_monkeypatching():
+        # TODO
         try:
-            import isaacsim
-            isaacsim.bootstrap_kernel()
+            try:
+                # TODO
+                import isaacsim
+                isaacsim.bootstrap_kernel()
+
+                import isaacsim.kit.kit_app
+                kit_app = isaacsim.kit.kit_app.KitApp()
+            except ImportError as error:
+                import omni.kit_app
+                omni.kit_app.bootstrap_kernel()
+                kit_app = omni.kit_app.KitApp()
         except Exception as error:
             raise RuntimeError(
-                f"Failed to load the isaacsim kernel. To possibly resolve the problem: "
+                f"Failed to load the Omniverse kit kernel. To possibly resolve the problem: "
                 f"- If you are in a Conda environment, run `conda install 'libstdcxx>11'`. "
                 f"- If you are using Linux, also run `ldd --version` to check your GLIC version "
                 f"and upgrade your Linux distribution if the version is below 2.35. "
                 f"For more information, see https://robotodo-isaac.readthedocs.io/en/latest/content/manuals/tutorial-000_installation.html"
             ) from error
-
-        try:
-            import isaacsim.kit.kit_app
-            kit_app = isaacsim.kit.kit_app.KitApp()
-        except ImportError as error:
-            import warnings
-            warnings.warn(f"TODO: {error}")
-            import omni.kit_app
-            omni.kit_app.bootstrap_kernel()
-            kit_app = omni.kit_app.KitApp()
-
+        
         # TODO
         # nest_asyncio.apply()
         nest_asyncio._patch_loop(asyncio.get_event_loop())
@@ -215,9 +218,21 @@ class Kernel:
             "--portable", # run as portable to prevent writing extra files to user directory
             "--reset-user",
 
-            # "--/app/runLoops/main/rateLimitEnabled=false",
+            # TODO perf
+            "--/app/runLoops/main/rateLimitEnabled=false",
+            # TODO memory leak when enabled
             # "--/app/runLoops/rendering_0/rateLimitEnabled=false",
             # "--/app/runLoops/present/rateLimitEnabled=false",
+            # TODO ~1ms
+            "--/app/omni.usd/enableAsyncSleep=false",
+            "--/app/omni.usd/asyncSleepDurationUs=0",
+            "--/persistent/resourcemonitor/timeBetweenQueries=0",
+            "--/app/renderer/skipWhileInvisible=true",
+            "--/app/renderer/skipWhileMinimized=true",
+            "--/app/renderer/sleepMsOnFocus=0",
+            "--/app/renderer/sleepMsOutOfFocus=0",
+            # TODO
+            "--/app/renderer/terminateRunloopWithZeroViewports=true",
 
             # TODO
             "--/exts/omni.appwindow/autocreateAppWindow=false",
@@ -240,6 +255,7 @@ class Kernel:
 
             "--/foundation/verifyOsVersion/enabled=false",
             
+            # NOTE disables IOMMU warning dialog
             "--/persistent/renderer/startupMessageDisplayed=true",
             
             "--/app/content/emptyStageOnStart=false",
@@ -286,6 +302,12 @@ class Kernel:
             "--enable", "omni.hydra.usdrt_delegate",
             "--/app/useFabricSceneDelegate=true",
             "--/rtx/hydra/readTransformsFromFabricInRenderDelegate=true",
+
+            # TODO necesito??
+            "--/persistent/omnihydra/useSceneGraphInstancing=true",
+
+            # TODO
+            "--/persistent/physics/enableDeformableBeta=true",
         ])
         if extra_argv is not None:
             argv.extend(extra_argv)
@@ -396,10 +418,13 @@ class Kernel:
         ext_manager = self._app.get_extension_manager()
         if ext_manager.is_extension_enabled(name) is enabled:
             return
-        if immediate:
-            ext_manager.set_extension_enabled_immediate(name, enabled)
-        else:
-            ext_manager.set_extension_enabled(name, enabled)
+        # NOTE shush because there's already carb logging. 
+        # omni.kit.registry.nucleus is extremely noisy if exts need to be downloaded
+        with contextlib.redirect_stdout(None):
+            if immediate:
+                ext_manager.set_extension_enabled_immediate(name, enabled)
+            else:
+                ext_manager.set_extension_enabled(name, enabled)
 
     def _omni_enable_extensions(
         self, 
@@ -408,11 +433,12 @@ class Kernel:
         immediate: bool = True,
     ):
         ext_manager = self._app.get_extension_manager()
-        for name in names:
-            ext_manager.set_extension_enabled(name, enabled)
-        if immediate:
-            # TODO FIXME perf: this is expensive ~2ms
-            ext_manager.process_and_apply_all_changes()
+        with contextlib.redirect_stdout(None):
+            for name in names:
+                ext_manager.set_extension_enabled(name, enabled)
+            if immediate:
+                # TODO FIXME perf: this is expensive ~2ms
+                ext_manager.process_and_apply_all_changes()
 
     def _omni_import_module(self, module: str):
         return __import__(module)

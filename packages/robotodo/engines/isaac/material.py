@@ -37,12 +37,12 @@ class Material(ProtoMaterial):
 
     @classmethod
     def load_usd(cls, ref: PathExpressionLike, source: str, scene: Scene):
-        return cls(Entity.load_usd(ref, source=source, scene=scene))
+        raise DeprecationWarning("TODO deprecated, use `.load` directly")
     
     @classmethod
     def load(cls, ref: PathExpressionLike, source: str, scene: Scene):
-        # TODO
-        return cls.load_usd(ref, source=source, scene=scene)
+        # TODO check material
+        return cls(Entity.load(ref, source=source, scene=scene))
 
     def __init__(
         self,

@@ -28,9 +28,10 @@ class Entity(ProtoEntity):
     _scene: Scene
 
     @classmethod
-    def load_usd(cls, ref: PathExpressionLike, source: str | IO, scene: Scene):
+    def load(cls, ref: PathExpressionLike, source: "str | IO | pxr.Sdf.Layer", scene: Scene):
         expr = PathExpression(ref)
 
+        # TODO
         prims = usd_add_reference(
             stage=scene._usd_stage,
             paths=expr.expand(),
@@ -39,15 +40,6 @@ class Entity(ProtoEntity):
         )         
 
         return cls(lambda: prims, scene=scene)
-    
-    @classmethod
-    def load(cls, ref: PathExpressionLike, source: str | IO, scene: Scene):
-        # TODO
-        return cls.load_usd(
-            ref=ref,
-            source=source,
-            scene=scene,
-        )
 
     def __init__(
         self, 

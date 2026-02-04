@@ -61,20 +61,12 @@ class Joint(ProtoJoint):
     # TODO
     @classmethod
     def create(cls):
-        raise NotImplementedError
-
-    @classmethod
-    def load_usd(cls, ref: PathExpressionLike, source: str, scene: Scene):
-        return cls(Entity.load_usd(ref, source=source, scene=scene))
+        raise NotImplementedError("TODO")
     
     @classmethod
     def load(cls, ref: PathExpressionLike, source: str, scene: Scene):
-        # TODO
-        return cls.load_usd(
-            ref=ref,
-            source=source,
-            scene=scene,
-        )
+        # TODO convert? check?
+        return cls(Entity.load(ref, source=source, scene=scene))
 
     # TODO use _kernel
     def __init__(
@@ -368,34 +360,27 @@ class Articulation(ProtoArticulation):
         raise NotImplementedError
 
     @classmethod
-    def load_usd(cls, ref: PathExpressionLike, source: str, scene: Scene):
-        return cls(Entity.load_usd(ref, source=source, scene=scene))
-    
-    @classmethod
-    def load_urdf(cls, ref: PathExpressionLike, source: str, scene: Scene):
-        expr = PathExpression(ref)
-        prims = usd_import_urdf(
-            stage=scene._usd_stage,
-            paths=expr.expand(),
-            resource_or_model=source,
-            kernel=scene._kernel,
-        )
-        return cls(lambda: prims, scene=scene)
-
-    @classmethod
     def load(cls, ref: PathExpressionLike, source: str, scene: Scene):
         # TODO
         import pathlib
         import urllib.parse
 
+        # TODO use pxr.sdf? 
+        # TODO upstream: util to standardize url handling?
         match pathlib.Path(urllib.parse.urlparse(source).path).suffixes:
-            # TODO rm: usd has custom format handlers for this so no need?
-            # case [".usd"]:
-            #     return cls.load_usd(ref=ref, source=source, scene=scene)
             case [".urdf"]:
-                return cls.load_urdf(ref=ref, source=source, scene=scene)
+                expr = PathExpression(ref)
+                prims = usd_import_urdf(
+                    stage=scene._usd_stage,
+                    paths=expr.expand(),
+                    resource_or_model=source,
+                    kernel=scene._kernel,
+                )
+                return cls(lambda: prims, scene=scene)
+    
+            # NOTE other formats are handled through USD
             case _:
-                return cls.load_usd(ref=ref, source=source, scene=scene)
+                return cls(Entity.load(ref, source=source, scene=scene))
 
     def __init__(
         self,
@@ -437,7 +422,6 @@ class Articulation(ProtoArticulation):
             # NOTE this already includes the prim itself
             for maybe_root_prim in pxr.Usd.PrimRange(
                 prim, 
-                # TODO rm???
                 pxr.Usd.TraverseInstanceProxies(
                     pxr.Usd.PrimAllPrimsPredicate
                 ),
@@ -673,8 +657,11 @@ class Articulation(ProtoArticulation):
     def dof_positions(self, value):
         # TODO doc: rotation convention https://github.com/NVIDIAGameWorks/PhysX/issues/126#issuecomment-503007721
         view = self._isaac_physics_articulation_view
-        value_ = torch.broadcast_to(torch.asarray(value), (view.count, view.max_dofs))
-        view.set_dof_positions(value_, indices=torch.arange(view.count))
+        device = self._scene._omni_physics_tensor_view.device
+        value_ = torch.asarray(value, device=device)
+        value_ = torch.broadcast_to(value_, (view.count, view.shared_metatype.dof_count))
+        indices = torch.arange(view.count, device=device)
+        view.set_dof_positions(value_, indices=indices)
         # TODO FIXME: perf .change_block to defer result fetching?
         # self._scene._isaac_physics_tensor_ensure_sync()
 
@@ -693,8 +680,11 @@ class Articulation(ProtoArticulation):
     @dof_velocities.setter
     def dof_velocities(self, value):
         view = self._isaac_physics_articulation_view
-        value_ = torch.broadcast_to(torch.asarray(value), (view.count, view.max_dofs))
-        view.set_dof_velocities(value_, indices=torch.arange(view.count))
+        device = self._scene._omni_physics_tensor_view.device
+        value_ = torch.asarray(value, device=device)
+        value_ = torch.broadcast_to(value_, (view.count, view.shared_metatype.dof_count))
+        indices = torch.arange(view.count, device=device)
+        view.set_dof_velocities(value_, indices=indices)
         # self._scene._isaac_physics_tensor_ensure_sync()
 
     # TODO dof_velocity_limits
@@ -713,19 +703,19 @@ class Articulation(ProtoArticulation):
 import functools
 from typing import TypedDict, Unpack
 
-from tensorspecs import TensorTableLike, TensorSpec, TensorTableSpec
-
+from tensorspecs import TensorLike, TensorTableLike, TensorSpec, TensorTableSpec
 
 
 # TODO mv
-ArticulationAction = TensorTableLike[{
+class ArticulationAction(TypedDict, total=False):
+    """
+    TODO doc articulation action protocol type
+    """
     # TODO -or- namedtensor??
-    "dof_names": TensorSpec("dof"),
+    dof_names: TensorLike["dof"]
     # TODO waypoint optional?
-    "dof_positions": TensorSpec("n? timestep dof"),
-    "dof_velocities": TensorSpec("n? timestep dof"),
-}]
-"""TODO doc articulation action protocol type"""
+    dof_positions: TensorLike["n? timestep dof"]
+    dof_velocities: TensorLike["n? timestep dof"]
 
 
 class ArticulationDriver:
@@ -751,8 +741,11 @@ class ArticulationDriver:
     @dof_stiffnesses.setter
     def dof_stiffnesses(self, value):
         view = self._articulation._isaac_physics_articulation_view
-        value_ = torch.broadcast_to(torch.asarray(value), (view.count, view.max_dofs))
-        view.set_dof_stiffnesses(value_, indices=torch.arange(view.count))
+        device = self._articulation._scene._omni_physics_tensor_view.device
+        value_ = torch.asarray(value, device=device)
+        value_ = torch.broadcast_to(value_, (view.count, view.max_dofs))
+        indices = torch.arange(view.count, device=device)
+        view.set_dof_stiffnesses(value_, indices=indices)
 
     @property
     def dof_dampings(self):
@@ -762,8 +755,11 @@ class ArticulationDriver:
     @dof_dampings.setter
     def dof_dampings(self, value):
         view = self._articulation._isaac_physics_articulation_view
-        value_ = torch.broadcast_to(torch.asarray(value), (view.count, view.max_dofs))
-        view.set_dof_dampings(value_, indices=torch.arange(view.count))
+        device = self._articulation._scene._omni_physics_tensor_view.device
+        value_ = torch.asarray(value, device=device)
+        value_ = torch.broadcast_to(value_, (view.count, view.max_dofs))
+        indices = torch.arange(view.count, device=device)
+        view.set_dof_dampings(value_, indices=indices)
     
     # TODO
     @property
@@ -780,8 +776,11 @@ class ArticulationDriver:
     @dof_forces.setter
     def dof_forces(self, value):
         view = self._articulation._isaac_physics_articulation_view
-        value_ = torch.broadcast_to(torch.asarray(value), (view.count, view.max_dofs))
-        view.set_dof_actuation_forces(value_, indices=torch.arange(view.count))
+        device = self._articulation._scene._omni_physics_tensor_view.device
+        value_ = torch.asarray(value, device=device)
+        value_ = torch.broadcast_to(value_, (view.count, view.max_dofs))
+        indices = torch.arange(view.count, device=device)
+        view.set_dof_actuation_forces(value_, indices=indices)
 
     # TODO typing: DriveType
     @property
@@ -797,8 +796,11 @@ class ArticulationDriver:
     @dof_target_positions.setter
     def dof_target_positions(self, value):
         view = self._articulation._isaac_physics_articulation_view
-        value_ = torch.broadcast_to(torch.asarray(value), (view.count, view.max_dofs))
-        view.set_dof_position_targets(value_, indices=torch.arange(view.count))
+        device = self._articulation._scene._omni_physics_tensor_view.device
+        value_ = torch.asarray(value, device=device)
+        value_ = torch.broadcast_to(value_, (view.count, view.max_dofs))
+        indices = torch.arange(view.count, device=device)
+        view.set_dof_position_targets(value_, indices=indices)
 
     @property
     def dof_target_velocities(self):
@@ -808,8 +810,11 @@ class ArticulationDriver:
     @dof_target_velocities.setter
     def dof_target_velocities(self, value):
         view = self._articulation._isaac_physics_articulation_view
-        value_ = torch.broadcast_to(torch.asarray(value), (view.count, view.max_dofs))
-        view.set_dof_velocity_targets(value_, indices=torch.arange(view.count))
+        device = self._articulation._scene._omni_physics_tensor_view.device
+        value_ = torch.asarray(value, device=device)
+        value_ = torch.broadcast_to(value_, (view.count, view.max_dofs))
+        indices = torch.arange(view.count, device=device)
+        view.set_dof_velocity_targets(value_, indices=indices)
 
     # TODO
     async def execute_action(
@@ -822,8 +827,6 @@ class ArticulationDriver:
         # TODO
         # iteration_callback: ... = None,
     ):
-        dof_indices = numpy.s_[:]
-
         dof_names = action.get("dof_names", None)
         if dof_names is not None:
             # TODO support native .index(<batch_dof_names>)
@@ -831,23 +834,36 @@ class ArticulationDriver:
                 self._articulation.dof_names.index(dof_name)
                 for dof_name in dof_names
             ]
+            dof_count = len(dof_indices)
+        else:
+            dof_indices = numpy.s_[:]
+            dof_count = self._articulation._isaac_physics_articulation_view.shared_metatype.dof_count
 
         dof_positions = action.get("dof_positions", None)
+        if dof_positions is None:
+            dof_positions = self._articulation.dof_positions        
         dof_velocities = action.get("dof_velocities", None)
+        if dof_velocities is None:
+            dof_velocities = self._articulation.dof_velocities
+        
+        dof_positions = torch.asarray(dof_positions)
+        dof_velocities = torch.asarray(dof_velocities)
+        dof_positions, dof_velocities = (
+            torch.broadcast_tensors(dof_positions, dof_velocities)
+        )
 
-        if dof_positions is None or dof_velocities is None:
-            # TODO
-            raise NotImplementedError
+        shape = (
+            self._articulation._isaac_physics_articulation_view.count,
+            -1,
+            dof_count,
+        )
+        dof_positions = torch.broadcast_to(dof_positions, size=shape)
+        dof_velocities = torch.broadcast_to(dof_velocities, size=shape)
 
-        n_p, n_timesteps_p, n_dofs_p = numpy.shape(dof_positions)
-        n_v, n_timesteps_v, n_dofs_v = numpy.shape(dof_velocities)
-
-        # TODO
-        assert n_p == n_v
-        assert n_timesteps_p == n_timesteps_v
-        assert n_dofs_p == n_dofs_v
-
-        n_timesteps = n_timesteps_p
+        _, n_timesteps, _ = torch.broadcast_shapes(
+            dof_positions.shape, 
+            dof_velocities.shape,
+        )
 
         for timestep in range(n_timesteps):
             dof_target_positions = self.dof_target_positions            
@@ -879,8 +895,8 @@ class ArticulationDriver:
                 # iteration_callback(position_err, velocity_err)
 
                 if all([
-                    numpy.allclose(position_err, 0., atol=position_error_limit),
-                    numpy.allclose(velocity_err, 0., atol=velocity_error_limit),
+                    torch.allclose(position_err, torch.asarray(0.), atol=position_error_limit),
+                    torch.allclose(velocity_err, torch.asarray(0.), atol=velocity_error_limit),
                 ]):
                     break
 

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-UI utilities.
+Omniverse UI utilities.
 """
 
 
@@ -214,7 +214,7 @@ def omni_enable_editing_experience(kernel: Kernel):
         "omni.usdphysics.ui",
         "omni.simready.explorer",
         # TODO
-        # "isaacsim.gui.content_browser",
+        "isaacsim.gui.content_browser",
     ]
 
     workspace_layout = [

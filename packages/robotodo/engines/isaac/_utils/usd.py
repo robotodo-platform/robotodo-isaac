@@ -65,22 +65,9 @@ def usd_create_stage(
 ) -> "pxr.Usd.Stage":
     if kernel is None:
         kernel = get_running_kernel()
-
     pxr = kernel._pxr
     kernel._omni_import_module("pxr.Usd")
-    # kernel._omni_import_module("pxr.UsdGeom")
-
     stage = pxr.Usd.Stage.CreateInMemory()
-    # TODO customizable!!!  also necesito???
-    # pxr.UsdGeom.SetStageUpAxis(stage, pxr.UsdGeom.Tokens.z)
-
-    # # TODO this attaches the stage to the viewer and inits rendering+physics?
-    # # TODO FIXME rm in the future when: 1) urdf stage= bug has been fixed 2) users are informed of the behavior
-    # kernel._omni_enable_extension("omni.usd")
-    # # TODO
-    # import asyncio
-    # asyncio.ensure_future(kernel._omni.usd.get_context().attach_stage_async(stage))
-
     return stage
 
 
@@ -147,7 +134,7 @@ def usd_save_stage(
 def usd_add_reference(
     stage: "pxr.Usd.Stage",
     paths: Iterable[str],
-    resource: str | IO,
+    resource: "str | IO | pxr.Sdf.Layer",
     # TODO
     kernel: Kernel | None = None,
     overwrite: bool = True,
@@ -161,6 +148,8 @@ def usd_add_reference(
 
     layer = ...
     match resource:
+        case pxr.Sdf.Layer():
+            layer = resource
         case str():
             layer = pxr.Sdf.Layer.FindOrOpen(resource)
             if not layer:
@@ -189,6 +178,47 @@ def usd_add_reference(
             prim_spec.referenceList.Add(layer_ref)
             
     return [stage.DefinePrim(path) for path in paths]
+
+
+@contextlib.contextmanager
+def usd_open_prim(
+    source: str,
+    path: str | None = None,
+    copy: bool = False,
+    kernel: Kernel | None = None,
+):
+    r"""
+    TODO doc
+    
+    """
+
+    if kernel is None:
+        # TODO
+        kernel = get_running_kernel()
+    
+    pxr = kernel._pxr
+
+    source_layer = pxr.Sdf.Layer.FindOrOpen(source)
+
+    source_stage = ...
+    if not copy:
+        source_stage = pxr.Usd.Stage.Open(source_layer)
+    else:
+        source_layer_todo = pxr.Sdf.Layer.CreateAnonymous()
+        source_layer_todo.subLayerPaths.append(source_layer.identifier)
+        source_layer_todo.defaultPrim = source_layer.defaultPrim
+        source_stage = pxr.Usd.Stage.Open(source_layer_todo)
+
+    source_prim = (
+        source_stage.GetDefaultPrim()
+        if path is None else
+        source_stage.GetPrimAtPath(path)
+    )
+    if not source_prim.IsValid():
+        raise RuntimeError(f"USD source does not contain a valid prim specified {path=}: {source}")
+
+    yield source_prim
+
 
 
 
@@ -313,6 +343,7 @@ class USDPrimPathExpressionRef(USDPrimRef):
         import pxr
         # TODO DO NOT dedup !!!!
         # TODO avoid roundtrip
+        # TODO use .filter
         paths = self._path_expr.resolve((
             prim.GetPath().pathString 
             for prim in stage.Traverse(pxr.Usd.TraverseInstanceProxies())
@@ -593,9 +624,9 @@ def usd_physx_query_articulation_properties(
     return result
     
 
+# TODO deprecate ###################################################################################
 # TODO
 # usd_physics_remove_rigid
-
 
 def usd_physics_make_rigid(
     prims: Iterable["pxr.Usd.Prim"], 
@@ -620,10 +651,11 @@ def usd_physics_make_rigid(
             prim_path=prim.GetPath(),
         )
 
+        # TODO this seems inconvenient
         # NOTE pxr.UsdGeom.Xformable should work 
         # however we use pxr.UsdGeom.Gprim to ensure consistency with deformables
-        if not prim.IsA(pxr.UsdGeom.Gprim):
-            continue
+        # if not prim.IsA(pxr.UsdGeom.Gprim):
+        #     continue
 
         omni.physx.scripts.utils.setRigidBody(
             prim, 
@@ -633,7 +665,7 @@ def usd_physics_make_rigid(
 
 
 # TODO
-# TODO
+# TODO deprecate
 def enable_physx_deformable_beta(kernel: Kernel):
     """
     TODO doc
@@ -713,10 +745,10 @@ def usd_physics_make_surface_deformable(
             if prim.HasAPI("PhysxSurfaceDeformableBodyAPI"):
                 prim.GetAttribute("physxDeformableBody:selfCollision").Set(True)
 
-            return prim
+            # return prim
         
         warnings.warn(f"Non-mesh USD prim cannot be surface deformable: {prim}")
-
+# TODO deprecate ###################################################################################
 
 # TODO
 _USD_PHYSICSSCENE_PATH_DEFAULT = "/PhysicsScene"
@@ -777,3 +809,299 @@ def usd_prims_get_meters_per_unit(
         numpy.nan
         for prim in prims
     ])
+
+
+def usd_is_rigid(
+    prims: Iterable["pxr.Usd.Prim"], 
+    kernel: Kernel,
+):
+    value = []
+
+    for prim in prims:
+        v = prim.HasAPI("PhysicsRigidBodyAPI")
+        value.append(v)
+
+    return value
+
+
+def usd_make_rigid(
+    prims: Iterable["pxr.Usd.Prim"], 
+    kernel: Kernel,
+):
+    omni = kernel._omni
+    kernel._omni_enable_extension("omni.physx")
+    kernel._omni_import_module("omni.physx.scripts.deformableUtils")
+
+    for prim in prims:
+        omni.physx.scripts.deformableUtils.remove_deformable_body(
+            prim.GetStage(), 
+            prim_path=prim.GetPath(),
+        )
+
+        omni.physx.scripts.utils.setRigidBody(
+            prim, 
+            approximationShape=None, 
+            kinematic=False,
+        )
+
+
+def usd_enable_deformable_schema_beta(kernel: Kernel):
+    """
+    TODO doc
+
+    :param kernel: ...
+    """
+
+    import warnings
+
+    omni = kernel._omni
+    kernel._omni_enable_extension("omni.physx")
+
+    settings = kernel._carb.settings.get_settings()
+    SETTING_ENABLE_DEFORMABLE_BETA = omni.physx.bindings._physx.SETTING_ENABLE_DEFORMABLE_BETA
+
+    if not settings.get(SETTING_ENABLE_DEFORMABLE_BETA):
+        settings.set(SETTING_ENABLE_DEFORMABLE_BETA, True)
+        warnings.warn(
+            f"Deformable Schema Beta was requested to be enabled in Omniverse. "
+            f"It has now been enabled (Restart may be required for the changes to take effect). "
+            f"For details see https://docs.omniverse.nvidia.com/kit/docs/omni_physics/107.3/dev_guide/deformables_beta/deformable_authoring.html#enable-deformable-schema-beta"
+        )
+
+
+def usd_is_surface_deformable(prims: list["pxr.Usd.Prim"], kernel: Kernel):
+    pxr = kernel._pxr
+
+    value = []
+    for prim in prims:
+        v = False
+
+        match prim:
+            case _ if (
+                prim.IsA(pxr.UsdGeom.Imageable) 
+                and not prim.IsA(pxr.UsdGeom.Gprim)
+            ):
+                v = any(
+                    child_prim.HasAPI("OmniPhysicsSurfaceDeformableSimAPI")
+                    for child_prim in prim.GetChildren()
+                )
+
+            case _ if prim.IsA(pxr.UsdGeom.Mesh):
+                v = prim.HasAPI("OmniPhysicsSurfaceDeformableSimAPI")
+
+            case _:
+                pass
+
+        value.append(v)
+
+    return value
+
+
+def usd_make_surface_deformable(prims: list["pxr.Usd.Prim"], kernel: Kernel):
+    """
+    TODO doc
+
+    :param prims: ...
+    :param kernel: ...
+    """
+
+    usd_enable_deformable_schema_beta(kernel)
+
+    pxr = kernel._pxr
+    omni = kernel._omni
+    kernel._omni_enable_extension("omni.physx")
+    kernel._omni_import_module("omni.physx.scripts.deformableUtils")
+
+    for prim in prims:
+        omni.physx.scripts.utils.removeRigidBody(prim)
+
+        match prim:
+            case _ if (
+                prim.IsA(pxr.UsdGeom.Imageable) 
+                and not prim.IsA(pxr.UsdGeom.Gprim)
+            ):
+                # cooking_src_mesh_paths_existing = set(
+                #     path.pathString
+                #     for path in prim.GetRelationship("physxDeformableBody:cookingSourceMesh").GetTargets()
+                # )
+
+                for child_prim in list(pxr.Usd.PrimRange(prim)):
+                    # if child_prim.GetPath().pathString in cooking_src_mesh_paths_existing:
+                    #     continue
+
+                    if child_prim.HasAPI("OmniPhysicsSurfaceDeformableSimAPI"):
+                        continue
+
+                    match child_prim:
+                        case _ if child_prim.IsA(pxr.UsdGeom.Mesh):
+                            # TODO unique; this must be an immediate child
+                            identifier = pxr.Tf.MakeValidIdentifier(child_prim.GetPath().MakeRelativePath(prim.GetPath()).pathString)
+                            simulation_mesh_name = f"__SurfaceDeformableSim_{identifier}"
+                            simulation_mesh_path = prim.GetPath().AppendPath(simulation_mesh_name)
+                            assert omni.physx.scripts.deformableUtils.create_auto_surface_deformable_hierarchy(
+                                prim.GetStage(),
+                                prim.GetPath(),
+                                # TODO
+                                simulation_mesh_path=simulation_mesh_path,
+                                # TODO
+                                # simulation_mesh_path=child_prim.GetPath(),
+                                cooking_src_mesh_path=child_prim.GetPath(),
+                                cooking_src_simplification_enabled=False,
+                                set_visibility_with_guide_purpose=True,
+                            )
+                            # TODO instead do this on the whole stage?
+                            # omni.physx.get_physx_cooking_interface().cook_auto_deformable_body(prim.GetPath().pathString)
+                        case _ if not child_prim.IsA(pxr.UsdGeom.Gprim):
+                            continue
+                        case _:
+                            # raise NotImplementedError(f"TODO: {child_prim}")
+                            pass
+
+            case _ if prim.IsA(pxr.UsdGeom.Mesh):
+                api = pxr.UsdGeom.Mesh(prim)
+
+                # TODO do not force unless force=True?
+                if not numpy.array_equiv(api.GetFaceVertexCountsAttr().Get(), 3):
+                    warnings.warn(f"Mesh USD prim is not a triangle mesh, converting: {api}")
+                    # TODO do not use this
+                    face_vertex_indices = omni.physx.scripts.deformableUtils.triangulate_mesh(api)
+                    # TODO
+                    api.GetFaceVertexIndicesAttr().Set(face_vertex_indices)
+                    api.GetFaceVertexCountsAttr().Set(
+                        numpy.full(len(face_vertex_indices) // 3, 3)
+                    )
+
+                is_success = omni.physx.scripts.deformableUtils.set_physics_surface_deformable_body(
+                    prim.GetStage(), 
+                    prim_path=prim.GetPath(),
+                )
+                if not is_success:
+                    raise RuntimeError("TODO")
+                
+                # TODO
+                prim.ApplyAPI("PhysxSurfaceDeformableBodyAPI")
+                if prim.HasAPI("PhysxSurfaceDeformableBodyAPI"):
+                    prim.GetAttribute("physxDeformableBody:selfCollision").Set(True)
+
+            case _:
+                # TODO
+                raise NotImplementedError(f"TODO Non-mesh USD geometry prim cannot be surface deformable at the moment: {prim}")
+
+
+def usd_is_volume_deformable(prims: list["pxr.Usd.Prim"], kernel: Kernel):
+    pxr = kernel._pxr
+
+    value = []
+    for prim in prims:
+        v = False
+
+        match prim:
+            case _ if (
+                prim.IsA(pxr.UsdGeom.Imageable) 
+                and not prim.IsA(pxr.UsdGeom.Gprim)
+            ):
+                v = any(
+                    child_prim.HasAPI("OmniPhysicsVolumeDeformableSimAPI")
+                    for child_prim in prim.GetChildren()
+                )
+
+            case _ if prim.IsA(pxr.UsdGeom.Mesh):
+                v = prim.HasAPI("OmniPhysicsVolumeDeformableSimAPI")
+
+            case _:
+                pass
+
+        value.append(v)
+
+    return value
+
+
+def usd_make_volume_deformable(prims: list["pxr.Usd.Prim"], kernel: Kernel):
+    """
+    TODO doc
+
+    :param prims: ...
+    :param kernel: ...
+    """
+
+    usd_enable_deformable_schema_beta(kernel)
+
+    pxr = kernel._pxr
+    omni = kernel._omni
+    kernel._omni_enable_extension("omni.physx")
+    kernel._omni_import_module("omni.physx.scripts.deformableUtils")
+
+    for prim in prims:
+        omni.physx.scripts.utils.removeRigidBody(prim)
+
+        match prim:
+            case _ if (
+                prim.IsA(pxr.UsdGeom.Imageable) 
+                and not prim.IsA(pxr.UsdGeom.Gprim)
+            ):
+                for child_prim in list(pxr.Usd.PrimRange(prim)):
+                    if child_prim.HasAPI("OmniPhysicsVolumeDeformableSimAPI"):
+                        continue
+
+                    match child_prim:
+                        case _ if child_prim.IsA(pxr.UsdGeom.Mesh):
+                            identifier = pxr.Tf.MakeValidIdentifier(child_prim.GetPath().MakeRelativePath(prim.GetPath()).pathString)
+                            # TODO unique id; dispose of previous generated meshes
+                            simulation_tetmesh_name = f"__VolumeDeformableSim_{identifier}"
+                            simulation_tetmesh_path = prim.GetPath().AppendPath(simulation_tetmesh_name)
+                            collision_tetmesh_name = f"__VolumeDeformableSimCollision_{identifier}"
+                            collision_mesh_path = prim.GetPath().AppendPath(collision_tetmesh_name)
+                            # TODO this doesnt handle empty geoms well: visual_geometry_prims
+                            assert omni.physx.scripts.deformableUtils.create_auto_volume_deformable_hierarchy(
+                                prim.GetStage(),
+                                prim.GetPath(),
+                                simulation_tetmesh_path=simulation_tetmesh_path,
+                                collision_tetmesh_path=collision_mesh_path,
+                                cooking_src_mesh_path=child_prim.GetPath(),
+                                simulation_hex_mesh_enabled=True,
+                                cooking_src_simplification_enabled=False,
+                                set_visibility_with_guide_purpose=True,
+                            )
+                            # TODO instead do this on the whole stage?
+                            # omni.physx.get_physx_cooking_interface().cook_auto_deformable_body(prim.GetPath().pathString)
+                        case _:
+                            pass
+
+            case _ if prim.IsA(pxr.UsdGeom.TetMesh):
+                # TODO
+                assert omni.physx.scripts.deformableUtils.set_physics_volume_deformable_body(
+                    prim.GetStage(),
+                    prim.GetPath(),
+                )
+
+            # TODO test this
+            case _ if prim.IsA(pxr.UsdGeom.Mesh):
+                api = pxr.UsdGeom.Mesh(prim)
+
+                # TODO do not force unless force=True?
+                if not numpy.array_equiv(api.GetFaceVertexCountsAttr().Get(), 3):
+                    warnings.warn(f"Mesh USD prim is not a triangle mesh, converting: {api}")
+                    # TODO do not use this
+                    face_vertex_indices = omni.physx.scripts.deformableUtils.triangulate_mesh(api)
+                    # TODO
+                    api.GetFaceVertexIndicesAttr().Set(face_vertex_indices)
+                    api.GetFaceVertexCountsAttr().Set(
+                        numpy.full(len(face_vertex_indices) // 3, 3)
+                    )
+
+                points, indices = omni.physx.scripts.deformableUtils.compute_conforming_tetrahedral_mesh(
+                    triangle_mesh_points=api.GetPointsAttr().Get(),
+                    triangle_mesh_indices=api.GetFaceVertexIndicesAttr().Get(),
+                )
+                api_tetmesh = pxr.UsdGeom.TetMesh.Define(prim.GetStage(), prim.GetPath())
+                api_tetmesh.GetPointsAttr().Set(points)
+                api_tetmesh.GetTetVertexIndicesAttr().Set(numpy.reshape(indices, (-1, 4)))
+
+                # TODO for collison detection
+                api_tetmesh.GetSurfaceFaceVertexIndicesAttr().Set(
+                    pxr.UsdGeom.TetMesh.ComputeSurfaceFaces(api_tetmesh)
+                )
+
+            case _:
+                # TODO
+                raise NotImplementedError(f"TODO Non-mesh USD geometry prim cannot be volume deformable at the moment: {prim}")

@@ -35,7 +35,7 @@ from robotodo.engines.isaac._utils.usd import (
     USDPrimPathExpressionRef,
     usd_prims_get_meters_per_unit,
 )
-from robotodo.engines.isaac._utils.render import omni_usd_wait_next_render
+from robotodo.engines.isaac._utils.omni_render import omni_usd_wait_next_render
 
 
 # TODO
@@ -66,13 +66,9 @@ class Camera(ProtoCamera):
         return cls(lambda: prims, scene=scene)
 
     @classmethod
-    def load_usd(cls, ref: PathExpressionLike, source: str, scene: Scene):
-        return cls(Entity.load_usd(ref, source=source, scene=scene))
-
-    @classmethod
     def load(cls, ref: PathExpressionLike, source: str, scene: Scene):
         # TODO
-        return cls.load_usd(ref, source=source, scene=scene)
+        return cls(Entity.load(ref, source=source, scene=scene))
 
     # TODO
     def __init__(
@@ -150,11 +146,7 @@ class Camera(ProtoCamera):
             renderer = self._omni_renderer_default
 
         omni = self._scene._kernel._omni
-        self._scene._kernel._omni_enable_extensions(
-            [
-                "omni.usd",
-            ]
-        )
+        self._scene._kernel._omni_enable_extension("omni.usd")
 
         usd_context = self._scene._omni_usd_context
 
@@ -270,50 +262,50 @@ class Camera(ProtoCamera):
         return annotator
     
     # TODO unused
-    @functools.cache
-    def _omni_get_render_annotator_exec_event(
-        self,
-        annotator: ...,
-    ):
+    # @functools.cache
+    # def _omni_get_render_annotator_exec_event(
+    #     self,
+    #     annotator: ...,
+    # ):
 
-        node = annotator.get_node()
+    #     node = annotator.get_node()
 
-        import omni
+    #     import omni
 
-        Keys = omni.graph.core.Controller.Keys
+    #     Keys = omni.graph.core.Controller.Keys
 
-        event_node_path = f"{node.get_prim_path()}/TODO"
-        _todo_carb_event_name = f"TODOeventname.{id(self)}"
+    #     event_node_path = f"{node.get_prim_path()}/TODO"
+    #     _todo_carb_event_name = f"TODOeventname.{id(self)}"
 
-        omni.graph.core.Controller.edit(
-            node.get_graph(),
-            edit_commands={
-                Keys.CREATE_NODES: [
-                    # TODO
-                    (event_node_path, "omni.graph.action.SendMessageBusEvent")
-                ],
-                Keys.SET_VALUES: [
-                    (f"{event_node_path}.inputs:eventName", _todo_carb_event_name),
-                ],
-                Keys.CONNECT: [
-                    (f"{node.get_prim_path()}.outputs:exec", f"{event_node_path}.inputs:execIn"),
-                ],
-            },
-            allow_exists_node=True,
-            undoable=True,
-        )
+    #     omni.graph.core.Controller.edit(
+    #         node.get_graph(),
+    #         edit_commands={
+    #             Keys.CREATE_NODES: [
+    #                 # TODO
+    #                 (event_node_path, "omni.graph.action.SendMessageBusEvent")
+    #             ],
+    #             Keys.SET_VALUES: [
+    #                 (f"{event_node_path}.inputs:eventName", _todo_carb_event_name),
+    #             ],
+    #             Keys.CONNECT: [
+    #                 (f"{node.get_prim_path()}.outputs:exec", f"{event_node_path}.inputs:execIn"),
+    #             ],
+    #         },
+    #         allow_exists_node=True,
+    #         undoable=True,
+    #     )
 
-        # TODO
-        import omni, carb
-        bus = omni.kit.app.get_app().get_message_bus_event_stream()
-        msg_t = carb.events.type_from_string(_todo_carb_event_name)
+    #     # TODO
+    #     import omni, carb
+    #     bus = omni.kit.app.get_app().get_message_bus_event_stream()
+    #     msg_t = carb.events.type_from_string(_todo_carb_event_name)
 
-        return bus, msg_t
+    #     return bus, msg_t
 
-        # TODO doc
-        # def subscribe(_on_event: ...):
-        #     return bus.create_subscription_to_pop_by_type(msg_t, _on_event)
-        # return subscribe
+    #     # TODO doc
+    #     # def subscribe(_on_event: ...):
+    #     #     return bus.create_subscription_to_pop_by_type(msg_t, _on_event)
+    #     # return subscribe
 
     _omni_use_synchronization: bool = False
 
@@ -464,7 +456,8 @@ class Camera(ProtoCamera):
 
         res = einops.rearrange(
             warp.to_torch(frame_tiled),
-            "(num_tiles_height height) (num_tiles_width width) channel -> (num_tiles_height num_tiles_width) height width channel",
+            "(num_tiles_height height) (num_tiles_width width) channel "
+            "-> (num_tiles_height num_tiles_width) height width channel",
             height=resolution.height,
             width=resolution.width,
         )
@@ -481,7 +474,12 @@ class Camera(ProtoCamera):
     ):
         resolution = self.Resolution._make(resolution)
         return (
-            torch.asarray(await self._omni_read_frame(name="rgb", resolution=resolution))
+            torch.asarray(
+                await self._omni_read_frame(
+                    name="rgb", 
+                    resolution=resolution,
+                )
+            )
             / 255
         )
 
@@ -492,14 +490,10 @@ class Camera(ProtoCamera):
         resolution = self.Resolution._make(resolution)
         return torch.asarray(
             await self._omni_read_frame(
-                name="distance_to_image_plane", resolution=resolution
+                name="distance_to_image_plane", 
+                resolution=resolution,
             )
         )
-
-    @property
-    def projection_matrix(self):
-        # TODO
-        raise NotImplementedError
 
     @functools.cached_property
     def imager(self):
@@ -508,6 +502,17 @@ class Camera(ProtoCamera):
     @functools.cached_property
     def optics(self):
         return CameraOptics(self)
+
+    # TODO
+    def intrinsic_matrix(
+        self, 
+        resolution: Resolution | tuple[int, int] = _resolution_default,
+    ):
+        self.optics.focal_length
+        self.imager.size
+        resolution
+        raise NotImplementedError
+        ...
 
 
 class CameraImager(ProtoCameraImager):

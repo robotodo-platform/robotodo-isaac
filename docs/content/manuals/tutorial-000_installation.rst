@@ -29,6 +29,11 @@ Before you begin, complete the following check list:
     You may need to enable `long path support <https://pip.pypa.io/warnings/enable-long-paths>`_ 
     to avoid installation errors caused by path length limits. [#ref-isaacsim_pip]_
 
+- **Legal matters**
+  ``robotodo-isaac`` uses components from NVIDIA Omniverse. 
+  By installing or using Omniverse Kit, you agree to the terms of 
+  `NVIDIA OMNIVERSE LICENSE AGREEMENT (EULA) <https://docs.omniverse.nvidia.com/platform/latest/common/NVIDIA_Omniverse_License_Agreement.html>`_.
+
 
 Getting Started
 ---------------

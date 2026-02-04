@@ -13,7 +13,7 @@ readme = "README.md"
 license = "Apache-2.0"
 dependencies = [
     # TODO
-    "robotodo-core @ git+https://github.com/robotodo-platform/robotodo-core.git@6c4d90c",
+    "robotodo-core @ git+https://github.com/robotodo-platform/robotodo-core.git@cd3bef9",
     # TODO 
     "torch",
     "numpy",

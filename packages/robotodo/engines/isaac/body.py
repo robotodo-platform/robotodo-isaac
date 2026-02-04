@@ -10,7 +10,6 @@ import contextlib
 import dataclasses
 import functools
 import warnings
-from typing import NotRequired, TypedDict
 
 import numpy
 import torch
@@ -31,37 +30,20 @@ from robotodo.engines.isaac._utils.usd import (
     USDXformView,
     is_usd_prim_ref,
     usd_compute_geometry,
+    usd_open_prim,
+    usd_is_rigid,
+    usd_make_rigid,
+    usd_is_surface_deformable,
+    usd_make_surface_deformable,
+    usd_is_volume_deformable,
+    usd_make_volume_deformable,
+    # TODO deprecate
     usd_physics_make_rigid,
     usd_physics_make_surface_deformable,
 )
 
 
-# TODO find all bodies under the path instead???
 class Body(ProtoBody):
-
-    class _USDBodyPrimRef:
-        def __init__(self, ref: USDPrimRef, kernel: Kernel):
-            self._ref = ref
-            self._kernel = kernel
-
-        def __call__(self):
-            pxr = self._kernel._pxr
-            return [
-                child_prim
-                for prim in self._ref()
-                # NOTE this already includes the prim itself
-                for child_prim in pxr.Usd.PrimRange(
-                    prim, 
-                    # TODO rm???
-                    # pxr.Usd.TraverseInstanceProxies(
-                    #     pxr.Usd.PrimAllPrimsPredicate
-                    # ),
-                )
-                if child_prim.HasAPI(pxr.UsdPhysics.RigidBodyAPI)
-                    or pxr.UsdPhysics.RigidBodyAPI.CanApply(child_prim)
-                    or "OmniPhysicsBodyAPI" in prim.GetAppliedSchemas()
-            ]
-
     # TODO
     _usd_prim_ref: USDPrimRef
     _scene: Scene
@@ -161,61 +143,20 @@ class Body(ProtoBody):
         return cls(lambda: prims, scene=scene)
     
     @classmethod
-    def load_usd(
-        cls, 
-        ref: PathExpressionLike, 
-        source: str, 
-        scene: Scene,
-        spec_overrides: BodySpec = BodySpec(),
-    ):
-        entity = Entity.load_usd(ref, source=source, scene=scene)
-
-        prims = entity._usd_prim_ref()
-        match spec_overrides.get("kind", None):
-            case None:
-                pass
-            case BodyKind.RIGID:
-                usd_physics_make_rigid(prims, kernel=scene._kernel)
-            case BodyKind.DEFORMABLE_SURFACE:
-                usd_physics_make_surface_deformable(prims, kernel=scene._kernel)
-            case BodyKind.DEFORMABLE_VOLUME:
-                # TODO
-                raise NotImplementedError("TODO")
-            case _ as unknown:
-                raise ValueError(f"Unknown body kind: {unknown}")
-
-        return cls(entity)
-    
-    @classmethod
     def load(
         cls, 
         ref: PathExpressionLike, 
         source: str, 
         scene: Scene,
-        spec_overrides: BodySpec = BodySpec(),
     ):
-        # TODO
-        return cls.load_usd(
-            ref, 
-            source=source, 
-            scene=scene,
-            spec_overrides=spec_overrides,
+        # TODO check xform/geom
+        return cls(
+            Entity.load(
+                ref=ref,
+                source=source,
+                scene=scene,
+            )
         )
-
-    # TODO next
-    @classmethod
-    def find(
-        cls,
-        ref: "Body | Entity | USDPrimRef | PathExpressionLike",
-        scene: Scene | None = None,
-    ):
-        # TODO this feels hacky
-        instance = cls(ref=ref, scene=scene)
-        instance._usd_prim_ref = Body._USDBodyPrimRef(
-            instance._usd_prim_ref, 
-            kernel=instance._scene._kernel,
-        )
-        return instance
 
     # TODO
     def __init__(
@@ -504,46 +445,34 @@ class Body(ProtoBody):
 
 # TODO 
 class RigidBody(Body):
-
-    @classmethod
-    def load_usd(
-        cls, 
-        ref: PathExpressionLike, 
-        source: str, 
-        scene: Scene,
-        spec_overrides: BodySpec = BodySpec(),
-    ):
-        spec_overrides = BodySpec(spec_overrides)
-
-        match spec_overrides.get("kind", None):
-            case None:
-                spec_overrides["kind"] = BodyKind.RIGID
-            case BodyKind.RIGID:
-                pass
-            case _ as unsupported_kind:
-                raise ValueError(f"Inconsistent non-rigid body kind: {unsupported_kind}")
-            
-        return super().load_usd(
-            ref,
-            source=source,
-            scene=scene,
-            spec_overrides=spec_overrides,
-        )
-    
     @classmethod
     def load(
         cls, 
         ref: PathExpressionLike, 
         source: str, 
         scene: Scene,
-        spec_overrides: BodySpec = BodySpec(),
+        force: bool = True,
     ):
-        # TODO
-        return cls.load_usd(
-            ref, 
-            source=source, 
-            scene=scene,
-            spec_overrides=spec_overrides,
+        with usd_open_prim(source, kernel=scene._kernel) as prim:
+            [is_rigid] = usd_is_rigid([prim], kernel=scene._kernel)
+            if not is_rigid:
+                if not force:
+                    # TODO standardize in core
+                    raise RuntimeError(
+                        f"USD source's default prim {prim} not rigid, "
+                        f"set `force=True` to convert: {source}"
+                    )
+                with usd_open_prim(source, copy=True, kernel=scene._kernel) as prim_todo:
+                    usd_make_rigid([prim_todo], kernel=scene._kernel)
+                    source_todo = prim_todo.GetStage().GetRootLayer()
+            else:
+                source_todo = prim.GetStage().GetRootLayer()
+        return cls(
+            Entity.load(
+                ref=ref,
+                source=source_todo,
+                scene=scene,
+            )
         )
 
     @classmethod
@@ -605,20 +534,25 @@ class RigidBody(Body):
             else:
                 return rigid_body_view
         
-    # TODO is this relevant?? https://docs.omniverse.nvidia.com/kit/docs/omni_physics/108.1/dev_guide/rigid_bodies_articulations/rigid_bodies.html#automatic-computation-of-rigid-body-mass-distribution
+    # TODO is this relevant?? 
+    # https://docs.omniverse.nvidia.com/kit/docs/omni_physics/108.1/dev_guide/rigid_bodies_articulations/rigid_bodies.html#automatic-computation-of-rigid-body-mass-distribution
     @property
     def mass(self):
-        return self._omni_physics_rigid_body_view.get_masses()
+        view = self._omni_physics_rigid_body_view
+        return torch.reshape(self._omni_physics_rigid_body_view.get_masses(), (view.count, ))
     
     # TODO BUG upstream: physics tensor api: changes not written to usd until .step
     @mass.setter
     def mass(self, value):
         view = self._omni_physics_rigid_body_view
-        value_ = torch.broadcast_to(torch.asarray(value), (view.count, 1))
-        view.set_masses(value_, indices=torch.arange(view.count))
+        device = self._scene._omni_physics_tensor_view.device
+        value_ = torch.asarray(value, device=device)
+        value_ = torch.broadcast_to(value_, (view.count, 1))
+        indices = torch.arange(view.count, device=device)
+        view.set_masses(value_, indices=indices)
 
     @property
-    def mass_center_pose(self):
+    def mass_center(self):
         coms = self._omni_physics_rigid_body_view.get_coms()
         return Pose(
             p=coms[..., [0, 1, 2]],
@@ -626,87 +560,108 @@ class RigidBody(Body):
         )
     
     # TODO BUG upstream: physics tensor api: changes not written to usd until .step
-    @mass_center_pose.setter
-    def mass_center_pose(self, value: Pose):
+    @mass_center.setter
+    def mass_center(self, value: Pose):
         view = self._omni_physics_rigid_body_view
+        device = self._scene._omni_physics_tensor_view.device
         value_ = torch.broadcast_to(
-            torch.concat((torch.asarray(value.p), torch.asarray(value.q))),
+            torch.concat((
+                torch.asarray(value.p, device=device), 
+                torch.asarray(value.q, device=device),
+            )),
             size=(view.count, 7),
         )
-        view.set_coms(value_, indices=torch.arange(view.count))
+        indices = torch.arange(view.count, device=device)
+        view.set_coms(value_, indices=indices)
 
-
-# TODO
-# TODO https://docs.omniverse.nvidia.com/kit/docs/omni_physics/107.3/dev_guide/deformables_beta/physx_deformable_schema.html
-class DeformableBody(Body):
-    @classmethod
-    def create(
-        cls, 
-        ref: PathExpressionLike, 
-        scene: Scene, 
-        spec: BodySpec = BodySpec(),
-    ):
-        spec = BodySpec(spec)
-
-        match spec.get("kind", None):
-            case None:
-                # TODO DEFORMABLE_VOLUME should be default??
-                spec["kind"] = BodyKind.DEFORMABLE_SURFACE
-            case BodyKind.DEFORMABLE_SURFACE:
-                pass
-            case BodyKind.DEFORMABLE_VOLUME:
-                pass
-            case _ as unsupported_kind:
-                raise ValueError(f"Inconsistent non-deformable body kind: {unsupported_kind}")
-
-        return super().create(
-            ref=ref,
-            scene=scene,
-            spec=spec,
-        )
-
-    @classmethod
-    def load_usd(
-        cls, 
-        ref: PathExpressionLike, 
-        source: str, 
-        scene: Scene,
-        spec_overrides: BodySpec = BodySpec(),
-    ):
-        spec_overrides = BodySpec(spec_overrides)
-
-        match spec_overrides.get("kind", None):
-            case None:
-                # TODO DEFORMABLE_VOLUME should be default??
-                spec_overrides["kind"] = BodyKind.DEFORMABLE_SURFACE
-            case BodyKind.DEFORMABLE_SURFACE:
-                pass
-            case BodyKind.DEFORMABLE_VOLUME:
-                pass
-            case _ as unsupported_kind:
-                raise ValueError(f"Inconsistent non-deformable body kind: {unsupported_kind}")
-            
-        return super().load_usd(
-            ref,
-            source=source,
-            scene=scene,
-            spec_overrides=spec_overrides,
+    @property
+    def inertia(self):
+        # TODO
+        view = self._omni_physics_rigid_body_view
+        return torch.reshape(
+            self._omni_physics_rigid_body_view.get_inertias(),
+            shape=(view.count, 3, 3),
         )
     
+    @inertia.setter
+    def inertia(self, value):
+        # TODO
+        view = self._omni_physics_rigid_body_view
+        device = self._scene._omni_physics_tensor_view.device
+        value_ = torch.asarray(value, device=device)
+        value_ = torch.broadcast_to(
+            value,
+            size=(view.count, 3, 3),
+        )
+        value_ = torch.reshape(
+            value_,
+            shape=(view.count, 9),
+        )
+        indices = torch.arange(view.count, device=device)
+        view.set_inertias(value_, indices=indices)
+        
+
+class SurfaceDeformableBody(Body):
     @classmethod
     def load(
         cls, 
         ref: PathExpressionLike, 
         source: str, 
         scene: Scene,
-        spec_overrides: BodySpec = BodySpec(),
+        force: bool = True,
     ):
-        # TODO
-        return cls.load_usd(
-            ref, 
-            source=source, 
-            scene=scene,
-            spec_overrides=spec_overrides,
+        with usd_open_prim(source, kernel=scene._kernel) as prim:
+            [is_surface_deformable] = usd_is_surface_deformable([prim], kernel=scene._kernel)
+            if not is_surface_deformable:
+                if not force:
+                    # TODO standardize in core
+                    raise RuntimeError(
+                        f"USD source's default prim {prim} not surface deformable, "
+                        f"set `force=True` to convert: {source}"
+                    )
+                with usd_open_prim(source, copy=True, kernel=scene._kernel) as prim_todo:
+                    usd_make_surface_deformable([prim_todo], kernel=scene._kernel)
+                    source_todo = prim_todo.GetStage().GetRootLayer()
+            else:
+                source_todo = prim.GetStage().GetRootLayer()
+        return cls(
+            Entity.load(
+                ref=ref,
+                source=source_todo,
+                scene=scene,
+            )
+        )
+
+
+class VolumeDeformableBody(Body):
+    @classmethod
+    def load(
+        cls, 
+        ref: PathExpressionLike, 
+        source: str, 
+        scene: Scene,
+        force: bool = True,
+    ):
+        with usd_open_prim(source, kernel=scene._kernel) as prim:
+            [is_volume_deformable] = usd_is_volume_deformable([prim], kernel=scene._kernel)
+            if not is_volume_deformable:
+                if not force:
+                    # TODO standardize in core
+                    raise RuntimeError(
+                        f"USD source's default prim {prim} not volume deformable, "
+                        f"set `force=True` to convert: {source}"
+                    )
+                with usd_open_prim(source, copy=True, kernel=scene._kernel) as prim_todo:
+                    usd_make_volume_deformable([prim_todo], kernel=scene._kernel)
+                    source_todo = prim_todo.GetStage().GetRootLayer()
+            else:
+                source_todo = prim.GetStage().GetRootLayer()
+        return cls(
+            Entity.load(
+                ref=ref,
+                source=source_todo,
+                scene=scene,
+            )
         )
 
 
@@ -726,6 +681,7 @@ class ContactPoint:
     separation: ...
     """The minimum distance between two shapes involved in the contact."""
 
+
 # TODO TensorTable
 @dataclasses.dataclass
 class ContactAnchor:
@@ -737,6 +693,7 @@ class ContactAnchor:
     """The position of the contact friction anchor in world frame."""
     impulse: ...
     """TODO The impulse applied."""
+
 
 @dataclasses.dataclass
 class Contact:

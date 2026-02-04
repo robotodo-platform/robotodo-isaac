@@ -4,7 +4,7 @@ import pytest
 import numpy
 
 from robotodo.engines.isaac.scene import Scene
-from robotodo.engines.isaac.sensor import Camera
+from robotodo.engines.isaac.camera import Camera
 from robotodo.utils.pose import Pose
 
 

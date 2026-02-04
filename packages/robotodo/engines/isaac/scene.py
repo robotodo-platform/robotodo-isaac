@@ -5,7 +5,6 @@ Scene.
 """
 
 
-import io
 import warnings
 import functools
 import contextlib
@@ -15,7 +14,7 @@ from typing import IO
 import numpy
 import torch
 from robotodo.engines.core.error import InvalidReferenceError
-from robotodo.engines.core.path import PathExpression, PathExpressionLike
+from robotodo.engines.core.path import PathExpression, PathExpressionLike, is_path_expression_like
 from robotodo.engines.core.scene import ProtoScene
 # TODO
 from robotodo.utils.event import BaseSubscriptionPartialAsyncEventStream
@@ -29,7 +28,7 @@ from robotodo.engines.isaac._utils.usd import (
     usd_save_stage,
     usd_physics_ensure_physics_scene,
 )
-from robotodo.engines.isaac._utils.ui import (
+from robotodo.engines.isaac._utils.omni_ui import (
     omni_enable_editing_experience,
     omni_enable_viewing_experience,
     omni_disable_ui,
@@ -65,19 +64,14 @@ class Scene(ProtoScene):
     @classmethod
     def create(cls, kernel: Kernel | None = None):
         stage = usd_create_stage(kernel=kernel)
-        return Scene(lambda: stage, kernel=kernel)
-    
-    # TODO
-    @classmethod
-    def load_usd(cls, source: str | IO, kernel: Kernel | None = None):
-        stage = usd_load_stage(source, kernel=kernel)
-        return Scene(lambda: stage, kernel=kernel)
-    
+        return cls(lambda: stage, kernel=kernel)
+
     # TODO
     @classmethod
     def load(cls, source: str | IO, kernel: Kernel | None = None):
         # TODO !!!! check extension
-        return cls.load_usd(source=source, kernel=kernel)
+        stage = usd_load_stage(source, kernel=kernel)
+        return cls(lambda: stage, kernel=kernel)
 
     class _USDKernelDefaultStageRef(USDStageRef):
         def __init__(self, kernel: Kernel):
@@ -151,11 +145,6 @@ class Scene(ProtoScene):
 
         usd_context = omni.usd.get_context()
         if usd_context.get_stage() != stage:
-            # TODO rm due to BUG
-            # self._kernel._omni_run_coroutine(
-            #     usd_context.attach_stage_async(stage),
-            # ).result()
-
             import concurrent.futures
             future = concurrent.futures.Future()
             def on_finish_fn(is_success: bool, message: str):
@@ -170,6 +159,33 @@ class Scene(ProtoScene):
             )
             # TODO
             assert future.result()
+
+            # TODO FIXME
+            # TODO option to enable/disable GPU physics
+            _use_gpu_physics: bool = False
+            if _use_gpu_physics:
+                carb = self._kernel._carb
+                settings = carb.settings.get_settings()
+
+                # TODO this enables exclusive fabric access?
+                # NOTE required for physx tensors API to use GPU
+                settings.set("/physics/suppressReadback", True)
+                # NOTE required for physx simulation to use GPU
+                self._kernel._omni_enable_extension("omni.physx.fabric")
+
+                play_simulations_orig = settings.get("/app/player/playSimulations")
+                settings.set("/app/player/playSimulations", False)
+
+                # TODO call before every reset; sub to reset event !!!
+                # self._omni_physx.reset_simulation()
+                # TODO use max val of 1? or determine minimal elapsedStep from 1 / physxScene:timeStepsPerSecond?
+                # NOTE required for physx GPU tensor API; call when stage attached to physx:
+                # "GPU tensor function fetchData can only be called after at least one simulation step was performed!"
+                self._omni_physx.update_simulation(elapsedStep=1, currentTime=0)
+                self._omni_physx.reset_simulation()
+                self._omni_physx_simulation.flush_changes()
+
+                settings.set("/app/player/playSimulations", play_simulations_orig)
 
         return usd_context
     
@@ -231,6 +247,7 @@ class Scene(ProtoScene):
             usd_physics_ensure_physics_scene(stage, kernel=self._kernel)
             # TODO NOTE this also starts the simulation
             self._omni_physx_simulation.flush_changes()
+
             self._omni_ensure_current_stage()
             res = omni.physics.tensors.create_simulation_view(
                 "torch",
@@ -242,8 +259,6 @@ class Scene(ProtoScene):
             raise RuntimeError(
                 "Failed to create physics view."
                 # f"Does a prim of type `PhysicsScene` exist on {self._usd_stage}?"
-                # TODO rm
-                # f"Make sure the physics simulation is running: call {self.timeline_play}"
             ) from error
         if not res.is_valid:
             raise RuntimeError(f"Created physics view is invalid: {res}")
@@ -255,6 +270,7 @@ class Scene(ProtoScene):
             del self._omni_physics_tensor_view_cache
         return self._omni_physics_tensor_view_cache
     
+    # TODO unused
     # TODO see https://github.com/isaac-sim/IsaacSim/issues/223
     def _omni_physics_tensor_ensure_sync(self):
         if not self._omni_physx.is_running():
@@ -271,24 +287,37 @@ class Scene(ProtoScene):
     def has(self, path: PathExpressionLike):    
         return len(self.resolve(path)) > 0
 
+    # TODO traverse instance proxies??
     def traverse(self, path: PathExpressionLike | None = None):
-        # TODO
-        if path is not None:
-            raise NotImplementedError(f"TODO {path}")
-
-        root_prim = (
-            self._usd_stage.GetPseudoRoot()
-            # if path is None else
-            # # TODO FIXME
-            # self._usd_stage.GetPrimAtPath(self.resolve(path))
-        )
-
-        return (
-            prim.GetPath().pathString
-            for prim in self._kernel._pxr.Usd.PrimRange(root_prim)
-        )
+        pxr = self._kernel._pxr
+        match path:
+            case None:
+                return (
+                    prim.GetPath().pathString
+                    for prim in self._usd_stage.Traverse()
+                )
+            case _ if pxr.Sdf.Path(path).IsAbsoluteRootPath():
+                return (
+                    prim.GetPath().pathString
+                    for prim in self._usd_stage.Traverse()
+                )
+            case _ if is_path_expression_like(path):
+                return (
+                    prim.GetPath().pathString
+                    # TODO use .filter
+                    for concrete_path in PathExpression(path).resolve(self.traverse())
+                    for prim in pxr.Usd.PrimRange(
+                        self._usd_stage.GetPrimAtPath(concrete_path),
+                        pxr.Usd.TraverseInstanceProxies(
+                            pxr.Usd.PrimAllPrimsPredicate
+                        ),
+                    )
+                )
+            case _:
+                raise ValueError("TODO")
 
     def resolve(self, path: PathExpressionLike):
+        # TODO use .filter
         return PathExpression(path).resolve(self.traverse())
 
     # TODO stage !!!!
@@ -362,6 +391,7 @@ class Scene(ProtoScene):
             timeline = self._scene._omni_usd_context.get_timeline()
             timeline.set_auto_update(True)
             timeline.play()
+            # TODO FIXME not threadsafe do not use
             timeline.commit()
             if self._future is None or self._future.done():
                 self._future = self._scene._kernel._omni_ensure_future(
@@ -372,6 +402,7 @@ class Scene(ProtoScene):
             timeline = self._scene._omni_usd_context.get_timeline()
             timeline.set_auto_update(False)
             timeline.pause()
+            # TODO FIXME not threadsafe do not use
             timeline.commit()
             if self._future is not None:
                 self._future.cancel()
@@ -413,7 +444,7 @@ class Scene(ProtoScene):
         controller._enabled = enabled
         return controller
 
-    # TODO
+    # TODO FIXME use timeline?
     # TODO ref https://docs.omniverse.nvidia.com/kit/docs/omni_physics/108.0/dev_guide/simulation_control/simulation_control.html
     async def step(
         self, 
@@ -440,7 +471,7 @@ class Scene(ProtoScene):
     async def reset(self):
         raise NotImplementedError
     
-    # TODO
+    # TODO use timeline
     @functools.cached_property
     def on_step(self):
         return PhysicsStepAsyncEventStream(scene=self)

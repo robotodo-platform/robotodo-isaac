@@ -12,12 +12,15 @@ from robotodo.engines.isaac.articulation import (
 )
 from robotodo.engines.isaac.body import (
     Body,
+    RigidBody,
+    SurfaceDeformableBody,
+    VolumeDeformableBody,
 )
 from robotodo.engines.isaac.entity import (
     Entity,
 )
 from robotodo.engines.isaac.scene import Scene
-from robotodo.engines.isaac.sensor import (
+from robotodo.engines.isaac.camera import (
     Camera,
 )
 
@@ -27,6 +30,9 @@ __all__ = [
     "JointKind",
     "Articulation",
     "Body",
+    "RigidBody",
+    "SurfaceDeformableBody",
+    "VolumeDeformableBody",
     "Entity",
     "Scene",
     "Camera",
