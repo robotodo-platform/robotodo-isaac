@@ -9,6 +9,8 @@ from robotodo.engines.isaac.articulation import (
     Joint,
     JointKind,
     Articulation,
+    ArticulationIdealDriver,
+    ArticulationPDDriver,
 )
 from robotodo.engines.isaac.body import (
     Body,
@@ -29,6 +31,8 @@ __all__ = [
     "Joint",
     "JointKind",
     "Articulation",
+    "ArticulationIdealDriver",
+    "ArticulationPDDriver",
     "Body",
     "RigidBody",
     "SurfaceDeformableBody",

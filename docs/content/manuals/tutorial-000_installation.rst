@@ -5,7 +5,7 @@ Before you begin, complete the following check list:
 
 - **Internet**
   The installation requires internet to complete.
-  Offline installation is possible but is out of scope for this document.
+  Offline installation is possible but is outside the scope of this document.
 
 - **Python**
 

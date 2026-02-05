@@ -8,12 +8,13 @@ Articulation.
 import functools
 import warnings
 import dataclasses
+import itertools
 from typing import Type, Unpack
+
 
 # TODO
 import torch
 import numpy
-
 from robotodo.utils.pose import Pose
 from robotodo.engines.core.path import (
     PathExpression, 
@@ -692,14 +693,14 @@ class Articulation(ProtoArticulation):
 
     @functools.cached_property
     def driver(self):
-        return ArticulationDriver(articulation=self)
+        return ArticulationPDDriver(articulation=self)
     
     # @functools.lru_cache
     def planner(self, **planner_kwds: Unpack["ArticulationPlanner.Config"]):
         return ArticulationPlanner(self, **planner_kwds)
 
 
-# TODO
+# TODO mv to core
 import functools
 from typing import TypedDict, Unpack
 
@@ -718,7 +719,108 @@ class ArticulationAction(TypedDict, total=False):
     dof_velocities: TensorLike["n? timestep dof"]
 
 
-class ArticulationDriver:
+class _ArticulationActionQuery:
+    def __init__(
+        self,
+        articulation: Articulation,
+        action: ArticulationAction,
+    ):
+        dof_names = action.get("dof_names", None)
+        if dof_names is not None:
+            self.dof_indices = [
+                articulation.dof_names.index(dof_name)
+                for dof_name in dof_names
+            ]
+            self.dof_count = len(self.dof_indices)
+        else:
+            self.dof_indices = numpy.s_[:]
+            self.dof_count = articulation._isaac_physics_articulation_view.shared_metatype.dof_count
+
+        shape = (
+            articulation._isaac_physics_articulation_view.count,
+            -1,
+            self.dof_count,
+        )
+
+        self.dof_positions = action.get("dof_positions", None)
+        if self.dof_positions is not None:
+            self.dof_positions = torch.broadcast_to(
+                torch.asarray(self.dof_positions), 
+                size=shape,
+            )
+
+        self.dof_velocities = action.get("dof_velocities", None)
+        if self.dof_velocities is not None:
+            self.dof_velocities = torch.broadcast_to(
+                torch.asarray(self.dof_velocities), 
+                size=shape,
+            )
+
+
+class ArticulationIdealDriver:
+    def __init__(self, articulation: Articulation):
+        self._articulation = articulation
+
+    @property
+    def dof_target_positions(self):
+        return self._articulation.dof_positions
+    
+    @dof_target_positions.setter
+    def dof_target_positions(self, value):
+        self._articulation.dof_positions = value
+
+    @property
+    def dof_target_velocities(self):
+        return self._articulation.dof_velocities
+    
+    @dof_target_velocities.setter
+    def dof_target_velocities(self, value):
+        self._articulation.dof_velocities = value
+
+    async def execute_action(
+        self,
+        # TODO
+        action: ArticulationAction,
+    ):
+        query = _ArticulationActionQuery(
+            articulation=self._articulation,
+            action=action,
+        )
+
+        for timestep in itertools.count():
+            should_return: bool = True
+
+            dof_target_positions = self.dof_target_positions
+            if query.dof_positions is not None:
+                *_, n_timesteps, _ = query.dof_positions.shape
+                if timestep < n_timesteps:
+                    dof_target_positions[..., query.dof_indices] = torch.asarray(
+                        query.dof_positions[..., timestep, :],
+                        dtype=dof_target_positions.dtype,
+                        device=dof_target_positions.device,
+                    )
+                    should_return = False
+                self.dof_target_positions = dof_target_positions
+
+            dof_target_velocities = self.dof_target_velocities
+            if query.dof_velocities is not None:
+                *_, n_timesteps, _ = query.dof_velocities.shape
+                if timestep < n_timesteps:
+                    dof_target_velocities[..., query.dof_indices] = torch.asarray(
+                        query.dof_velocities[..., timestep, :],
+                        dtype=dof_target_velocities.dtype,
+                        device=dof_target_velocities.device,
+                    )
+                    should_return = False
+                self.dof_target_velocities = dof_target_velocities
+            
+            await anext(self._articulation._scene.on_step)
+
+            if should_return:
+                break
+
+
+class ArticulationPDDriver:
     def __init__(self, articulation: Articulation):
         self._articulation = articulation
 
@@ -820,7 +922,7 @@ class ArticulationDriver:
     async def execute_action(
         self, 
         # TODO
-        action: "ArticulationAction",
+        action: ArticulationAction,
         # TODO
         position_error_limit: float = 1e-1,
         velocity_error_limit: float = 1e-1,
@@ -869,6 +971,7 @@ class ArticulationDriver:
             dof_target_positions = self.dof_target_positions            
             dof_target_positions[..., dof_indices] = torch.asarray(
                 dof_positions[:, timestep, :], 
+                dtype=dof_target_positions.dtype,
                 device=dof_target_positions.device,
             )
             self.dof_target_positions = dof_target_positions
@@ -876,7 +979,8 @@ class ArticulationDriver:
             dof_target_velocities = self.dof_target_velocities
             dof_target_velocities[..., dof_indices] = torch.asarray(
                 dof_velocities[:, timestep, :],
-                device=dof_target_positions.device,
+                dtype=dof_target_velocities.dtype,
+                device=dof_target_velocities.device,
             )
             self.dof_target_velocities = dof_target_velocities
 
