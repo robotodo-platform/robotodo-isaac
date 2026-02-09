@@ -186,6 +186,8 @@ class _CuroboKinematicsParser(CuroboKinematicsParser):
             # joint_name = joint.path[0]
             joint_name = self._robotodo_derive_entity_name(joint)
             joint_limits = None
+            joint_offset_multiplier = 1.
+            joint_offset_bias = 0.
 
             # TODO !!!!!
             joint_type = CuroboJointType.FIXED
@@ -214,32 +216,17 @@ class _CuroboKinematicsParser(CuroboKinematicsParser):
                     axis = _array_reduce_single(axis, shape=())
                     sign = _array_reduce_single(sign, shape=())
 
-                    # TODO
-                    match sign:
-                        case 1:
-                            match axis:
-                                case Axis.X:
-                                    joint_type = CuroboJointType.X_ROT
-                                case Axis.Y:
-                                    joint_type = CuroboJointType.Y_ROT
-                                case Axis.Z:
-                                    joint_type = CuroboJointType.Z_ROT
-                                case _:
-                                    # TODO
-                                    raise ValueError(f"TODO: {axis}")
-                        case -1:
-                            match axis:
-                                case Axis.X:
-                                    joint_type = CuroboJointType.X_ROT_NEG
-                                case Axis.Y:
-                                    joint_type = CuroboJointType.Y_ROT_NEG
-                                case Axis.Z:
-                                    joint_type = CuroboJointType.Z_ROT_NEG
-                                case _:
-                                    # TODO
-                                    raise ValueError(f"TODO: {axis}")
+                    joint_offset_multiplier = sign
+                    match axis:
+                        case Axis.X:
+                            joint_type = CuroboJointType.X_ROT
+                        case Axis.Y:
+                            joint_type = CuroboJointType.Y_ROT
+                        case Axis.Z:
+                            joint_type = CuroboJointType.Z_ROT
                         case _:
-                            raise ValueError(f"TODO: {sign}")
+                            # TODO
+                            raise ValueError(f"TODO: {axis}")
 
                     # TODO use common range instead?
                     joint_limits = _array_reduce_single(
@@ -265,33 +252,17 @@ class _CuroboKinematicsParser(CuroboKinematicsParser):
                     axis = _array_reduce_single(axis, shape=())
                     sign = _array_reduce_single(sign, shape=())
 
-                    # TODO
-                    match sign:
-                        case 1:
-                            match axis:
-                                case Axis.X:
-                                    joint_type = CuroboJointType.X_ROT
-                                case Axis.Y:
-                                    joint_type = CuroboJointType.Y_ROT
-                                case Axis.Z:
-                                    joint_type = CuroboJointType.Z_ROT
-                                case _:
-                                    # TODO
-                                    raise ValueError(f"TODO: {axis}")
-                        case -1:
-                            # TODO
-                            match axis:
-                                case Axis.X:
-                                    joint_type = CuroboJointType.X_ROT_NEG
-                                case Axis.Y:
-                                    joint_type = CuroboJointType.Y_ROT_NEG
-                                case Axis.Z:
-                                    joint_type = CuroboJointType.Z_ROT_NEG
-                                case _:
-                                    # TODO
-                                    raise ValueError(f"TODO: {axis}")
+                    joint_offset_multiplier = sign
+                    match axis:
+                        case Axis.X:
+                            joint_type = CuroboJointType.X_ROT
+                        case Axis.Y:
+                            joint_type = CuroboJointType.Y_ROT
+                        case Axis.Z:
+                            joint_type = CuroboJointType.Z_ROT
                         case _:
-                            raise ValueError(f"TODO: {sign}")
+                            # TODO
+                            raise ValueError(f"TODO: {axis}")
                         
                     # TODO use common range instead?
                     joint_limits = _array_reduce_single(
@@ -312,6 +283,8 @@ class _CuroboKinematicsParser(CuroboKinematicsParser):
                 parent_link_name=parent_link_name,
                 # TODO
                 joint_limits=joint_limits,
+                # TODO
+                joint_offset=[joint_offset_multiplier, joint_offset_bias],
             )
 
         return link_params
